@@ -1,0 +1,124 @@
+{
+  "entities": {
+    "question": {
+      "title": "Question",
+      "description": "A study question stored in the vault belonging to an authenticated user",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who owns this question",
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "enum": ["mcq", "short_answer", "enumerate"],
+          "description": "Type of question"
+        },
+        "question": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "The question text"
+        },
+        "options": {
+          "type": "array",
+          "description": "Choices for MCQ questions"
+        },
+        "answer": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Provided answer or serialized list for enumerate"
+        },
+        "answerMarkdown": {
+          "type": "string",
+          "maxLength": 20000,
+          "description": "AI-formatted structured markdown version of the answer"
+        },
+        "explanation": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Explanation or study context"
+        },
+        "subject": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Category or academic subject"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Source study file or document"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Keywords or tags for search"
+        },
+        "difficulty": {
+          "type": "string",
+          "enum": ["easy", "medium", "hard"],
+          "description": "Subjective review difficulty"
+        },
+        "important": {
+          "type": "boolean",
+          "description": "Whether marked as starred/important"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        },
+        "lastReviewedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last reviewed timestamp"
+        },
+        "reviewCount": {
+          "type": "integer",
+          "description": "Number of times reviewed"
+        }
+      },
+      "required": ["userId", "type", "question", "subject", "important", "createdAt", "updatedAt", "reviewCount"]
+    },
+    "userProfile": {
+      "title": "UserProfile",
+      "description": "User profile and custom study preferences",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The UID of the user"
+        },
+        "recentSubjects": {
+          "type": "array",
+          "description": "List of recent subjects used"
+        },
+        "subjects": {
+          "type": "array",
+          "description": "Predefined subjects and materials created by the user"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["userId", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/questions/{questionId}": {
+      "schema": "question",
+      "description": "Collection of all study questions per user"
+    },
+    "/users/{userId}": {
+      "schema": "userProfile",
+      "description": "Collection of user preferences and custom subjects"
+    }
+  }
+}

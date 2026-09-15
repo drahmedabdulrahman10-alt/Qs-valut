@@ -1,0 +1,6 @@
+{
+  "name": "Question Vault",
+  "description": "Personal question-review application to paste study questions, intelligently structure them with AI, and review with flashcards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

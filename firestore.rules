@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidQuestion(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.type is string && (data.type == 'mcq' || data.type == 'short_answer' || data.type == 'enumerate') &&
+             data.question is string && data.question.size() > 0 && data.question.size() <= 10000 &&
+             data.subject is string && data.subject.size() <= 100 &&
+             data.important is bool &&
+             data.reviewCount is int && data.reviewCount >= 0 &&
+             (!('difficulty' in data) || data.difficulty == null || data.difficulty in ['easy', 'medium', 'hard']) &&
+             (!('source' in data) || data.source == null || (data.source is string && data.source.size() <= 200)) &&
+             (!('options' in data) || data.options == null || (data.options is list && data.options.size() <= 20)) &&
+             (!('answer' in data) || data.answer == null || (data.answer is string && data.answer.size() <= 10000) || (data.answer is list && data.answer.size() <= 50)) &&
+             (!('answerMarkdown' in data) || data.answerMarkdown == null || (data.answerMarkdown is string && data.answerMarkdown.size() <= 20000)) &&
+             (!('explanation' in data) || data.explanation == null || (data.explanation is string && data.explanation.size() <= 10000)) &&
+             (!('tags' in data) || data.tags == null || (data.tags is list && data.tags.size() <= 30));
+    }
+
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             (!('recentSubjects' in data) || data.recentSubjects == null || (data.recentSubjects is list && data.recentSubjects.size() <= 100)) &&
+             (!('subjects' in data) || data.subjects == null || (data.subjects is list && data.subjects.size() <= 200)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // Health check ping collection for initial boot
+    match /test/{docId} {
+      allow get: if true;
+    }
+
+    // User preferences & subjects
+    match /users/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow create, update: if isSignedIn() && request.auth.uid == userId && incoming().userId == request.auth.uid && isValidUserProfile(incoming());
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Questions collection
+    match /questions/{questionId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(questionId) && incoming().userId == request.auth.uid && isValidQuestion(incoming());
+      allow update: if isSignedIn() && isValidId(questionId) && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidQuestion(incoming());
+      allow delete: if isSignedIn() && isValidId(questionId) && existing().userId == request.auth.uid;
+    }
+  }
+}
