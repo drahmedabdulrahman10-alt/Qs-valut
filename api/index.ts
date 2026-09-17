@@ -1,5 +1,6 @@
 import express from "express";
-import { apiRouter } from "../server/routes.ts";
+import type { Request, Response } from "express";
+import { apiRouter } from "../server/routes";
 
 const app = express();
 
@@ -10,4 +11,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api", apiRouter);
 app.use(apiRouter);
 
-export default app;
+export default function handler(req: Request, res: Response) {
+  return app(req, res);
+}
+

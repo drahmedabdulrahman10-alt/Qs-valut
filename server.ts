@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
-import { apiRouter } from "./server/routes.ts";
+import { apiRouter } from "./server/routes";
 
 dotenv.config();
 

@@ -4,7 +4,7 @@
  */
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { formatAnswerLocally } from "./answerFormatter.ts";
+import { formatAnswerLocally } from "./answerFormatter";
 
 let defaultAiClient: GoogleGenAI | null = null;
 

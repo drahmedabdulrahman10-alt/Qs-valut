@@ -9,8 +9,8 @@ import {
   parseQuestionsWithGemini,
   testGeminiApiKey,
   cleanErrorMessage,
-} from "./gemini.ts";
-import { formatAnswer } from "./answerFormatter.ts";
+} from "./gemini";
+import { formatAnswer } from "./answerFormatter";
 
 export const apiRouter = express.Router();
 
