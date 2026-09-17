@@ -4,7 +4,7 @@
  */
 
 import { GoogleGenAI } from "@google/genai";
-import { getGenAI, cleanErrorMessage } from "./gemini.ts";
+import { getGenAI, cleanErrorMessage } from "./gemini.js";
 
 export const FORMAT_ANSWER_SYSTEM_INSTRUCTION = `You are an expert document and medical study material formatting engine.
 Your ONLY job is to improve the VISUAL STRUCTURE and READABILITY of medical and academic answers by rendering them as clean, well-spaced Markdown.

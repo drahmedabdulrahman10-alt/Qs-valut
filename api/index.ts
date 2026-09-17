@@ -1,6 +1,6 @@
 import express from "express";
 import type { Request, Response } from "express";
-import { apiRouter } from "../server/routes";
+import { apiRouter } from "../server/routes.js";
 
 const app = express();
 
