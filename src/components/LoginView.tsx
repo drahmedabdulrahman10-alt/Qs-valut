@@ -1,22 +1,43 @@
 import React, { useState } from "react";
-import { BookOpen, Sparkles, ShieldCheck, Layers, ArrowRight, AlertCircle } from "lucide-react";
+import { BookOpen, Sparkles, ShieldCheck, Layers, ArrowRight, AlertCircle, ExternalLink, Copy, Check } from "lucide-react";
 import { useAuth } from "../context/AuthContext.tsx";
+import { firebaseConfig } from "../lib/firebase.ts";
 
 export function LoginView() {
   const { signInWithGoogle, authError } = useAuth();
   const [signingIn, setSigningIn] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState(false);
+  const [copiedDomain, setCopiedDomain] = useState(false);
+
+  const currentHostname = typeof window !== "undefined" ? window.location.hostname : "";
+
+  const handleCopyDomain = () => {
+    if (currentHostname && navigator.clipboard) {
+      navigator.clipboard.writeText(currentHostname);
+      setCopiedDomain(true);
+      setTimeout(() => setCopiedDomain(false), 2500);
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     setSigningIn(true);
     setLocalError(null);
+    setIsUnauthorizedDomain(false);
     try {
       await signInWithGoogle();
     } catch (err: any) {
       console.error("Sign-in failed:", err);
-      if (err?.code === "auth/popup-blocked") {
+      const code = err?.code || "";
+      const msg = err?.message || "";
+      if (code === "auth/unauthorized-domain" || msg.includes("unauthorized-domain")) {
+        setIsUnauthorizedDomain(true);
+        setLocalError(
+          `This domain (${currentHostname}) is not authorized in Firebase Authentication.`
+        );
+      } else if (code === "auth/popup-blocked") {
         setLocalError("The sign-in popup was blocked by your browser. Please allow popups for this site and try again.");
-      } else if (err?.code === "auth/cancelled-popup-request" || err?.code === "auth/popup-closed-by-user") {
+      } else if (code === "auth/cancelled-popup-request" || code === "auth/popup-closed-by-user") {
         setLocalError("Sign-in was cancelled. Please try again.");
       } else {
         setLocalError(err?.message || "Could not sign in with Google. Please try again.");
@@ -42,7 +63,37 @@ export function LoginView() {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="rounded-2xl border border-zinc-200 bg-white p-6 sm:p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          {(authError || localError) && (
+          {isUnauthorizedDomain ? (
+            <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-200">
+              <div className="flex items-start gap-2.5 mb-2 font-semibold">
+                <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                <span>Domain Authorization Required / مطلوب تفعيل النطاق</span>
+              </div>
+              <p className="mb-3 text-[13px] leading-relaxed">
+                Firebase rejects logins from new domains like Vercel until you add the domain to your Firebase Authorized Domains list.
+              </p>
+              <div className="flex items-center gap-2 bg-white/70 dark:bg-black/30 p-2 rounded-lg border border-amber-200 dark:border-amber-800 mb-3 font-mono text-[11px] select-all">
+                <span className="truncate flex-1 font-bold text-zinc-800 dark:text-zinc-200">{currentHostname}</span>
+                <button
+                  type="button"
+                  onClick={handleCopyDomain}
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-amber-200 hover:bg-amber-300 dark:bg-amber-800 dark:hover:bg-amber-700 text-amber-900 dark:text-amber-100 font-sans font-medium text-[11px] transition-colors"
+                >
+                  {copiedDomain ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  {copiedDomain ? "Copied" : "Copy Domain"}
+                </button>
+              </div>
+              <a
+                href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1.5 font-medium underline hover:text-amber-700 dark:hover:text-amber-300"
+              >
+                Open Firebase Console &rarr; Authorized Domains
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          ) : (authError || localError) && (
             <div className="mb-5 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3.5 text-xs text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
               <span>{localError || authError}</span>

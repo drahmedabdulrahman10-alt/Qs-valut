@@ -21,12 +21,12 @@ async function startServer() {
   // Mount API router
   app.use("/api", apiRouter);
 
-  // Serve static frontend in production or use Vite middleware in development
-  const isProduction = process.env.NODE_ENV === "production" || !process.stdin.isTTY;
+  // Serve static frontend in production when dist exists, or use Vite middleware in development
+  const isProduction = process.env.NODE_ENV === "production";
   const distPath = path.resolve(process.cwd(), "dist");
   const hasDist = fs.existsSync(path.join(distPath, "index.html"));
 
-  if (isProduction || hasDist) {
+  if (isProduction && hasDist) {
     app.use(express.static(distPath));
     app.get("*", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

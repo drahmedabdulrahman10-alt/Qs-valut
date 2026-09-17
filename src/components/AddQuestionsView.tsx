@@ -256,13 +256,51 @@ export function AddQuestionsView({
     setSaving(true);
     setError(null);
     try {
-      const count = await saveDrafts(drafts);
+      // 45-second timeout safeguard to ensure the UI is never stuck indefinitely
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                "Save request timed out. Please verify your network connection and Firestore security rules."
+              )
+            ),
+          45000
+        )
+      );
+      const count = await Promise.race([saveDrafts(drafts), timeoutPromise]);
       setSaveSuccessCount(count);
       setDrafts(null);
       setRawText("");
     } catch (err: any) {
       console.error("Batch save error:", err);
-      setError(err?.message || "Failed to save questions to Cloud Firestore.");
+      let userFriendlyMessage = "Failed to save questions to Cloud Firestore.";
+      const raw = err?.message || String(err);
+      if (
+        raw.includes("permission") ||
+        raw.includes("insufficient") ||
+        raw.includes("PERMISSION_DENIED")
+      ) {
+        userFriendlyMessage =
+          "Permission denied: Please verify that your secure Firestore security rules are published in the Firebase Console.";
+      } else {
+        try {
+          const parsed = JSON.parse(raw);
+          if (
+            parsed?.error &&
+            (parsed.error.includes("permission") ||
+              parsed.error.includes("insufficient"))
+          ) {
+            userFriendlyMessage =
+              "Permission denied: Please verify that your secure Firestore security rules are published in the Firebase Console.";
+          } else if (parsed?.error) {
+            userFriendlyMessage = parsed.error;
+          }
+        } catch {
+          userFriendlyMessage = raw;
+        }
+      }
+      setError(userFriendlyMessage);
     } finally {
       setSaving(false);
     }

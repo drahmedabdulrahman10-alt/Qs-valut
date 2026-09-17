@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getAuth,
   GoogleAuthProvider,
@@ -21,30 +21,59 @@ import {
   onSnapshot,
   writeBatch,
 } from "firebase/firestore";
-import firebaseConfig from "../../firebase-applet-config.json";
+import firebaseConfigFile from "../../firebase-applet-config.json";
 import { Question } from "../types/question.ts";
 
-const app = initializeApp(firebaseConfig);
+// Resolve Firebase configuration: prefers Vercel / Vite environment variables, falls back to config file
+export const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfigFile.apiKey || "",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigFile.authDomain || "qs-vault-14bfc.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfigFile.projectId || "qs-vault-14bfc",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigFile.storageBucket || "qs-vault-14bfc.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigFile.messagingSenderId || "",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfigFile.appId || "",
+};
+
+// Ensure there is only one singleton Firebase app initialization
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+// Determine database ID - default database for standard Firebase projects is undefined or "(default)"
+const rawEnvDbId = import.meta.env.VITE_FIREBASE_DATABASE_ID;
+const configDbId = (firebaseConfigFile as any).firestoreDatabaseId;
+// If the environment variable is an analytics tag (e.g. G-XXXXX) or "(default)", ignore it and use "(default)"
+const customDbId = (rawEnvDbId && !rawEnvDbId.startsWith("G-") && rawEnvDbId !== "(default)")
+  ? rawEnvDbId
+  : (configDbId && configDbId !== "(default)" ? configDbId : undefined);
+const targetDbId = customDbId;
+
+let firestoreInstance: ReturnType<typeof getFirestore>;
 
 // Configure Firestore settings to handle sandboxed iframes & proxies gracefully
 if (typeof window !== "undefined") {
   try {
-    initializeFirestore(
-      app,
-      {
-        experimentalAutoDetectLongPolling: true,
-      },
-      firebaseConfig.firestoreDatabaseId
-    );
+    firestoreInstance = targetDbId
+      ? initializeFirestore(
+          app,
+          {
+            experimentalAutoDetectLongPolling: true,
+          },
+          targetDbId
+        )
+      : initializeFirestore(app, {
+          experimentalAutoDetectLongPolling: true,
+        });
   } catch {
-    // If already initialized, getFirestore will return the existing configured instance
+    firestoreInstance = targetDbId ? getFirestore(app, targetDbId) : getFirestore(app);
   }
+} else {
+  firestoreInstance = targetDbId ? getFirestore(app, targetDbId) : getFirestore(app);
 }
 
-// Initialize Firestore with the specific database ID as required
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
+// Initialize Firestore with the appropriate database instance
+export const db = firestoreInstance;
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });
 
 export enum OperationType {
   CREATE = "create",
@@ -112,6 +141,8 @@ export async function testConnection(): Promise<void> {
       msg.includes("The operation could not be completed")
     ) {
       console.warn("Firestore connection notice: Backend connection pending or operating offline. Offline cache will be used.");
+    } else if (code === "permission-denied" || msg.includes("permission") || msg.includes("Missing or insufficient permissions")) {
+      // Backend responded with security rules check - server connection is verified
     } else {
       console.error("Please check your Firebase configuration:", error);
     }
@@ -176,8 +207,35 @@ export async function saveQuestion(question: Question): Promise<void> {
 }
 
 export async function batchSaveQuestions(questions: Question[]): Promise<void> {
-  for (const q of questions) {
-    await saveQuestion(q);
+  if (!questions || questions.length === 0) return;
+  const path = "questions";
+  try {
+    const CHUNK_SIZE = 400; // Well within Firestore 500 operations batch limit
+    for (let i = 0; i < questions.length; i += CHUNK_SIZE) {
+      const chunk = questions.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const q of chunk) {
+        const rawData = {
+          ...q,
+          options:
+            q.options && Array.isArray(q.options) && q.options.length > 0
+              ? q.options
+              : null,
+          answer: q.answer ?? null,
+          answerMarkdown: q.answerMarkdown ?? null,
+          explanation: q.explanation ?? null,
+          source: q.source ?? null,
+          tags: Array.isArray(q.tags) ? q.tags : [],
+          lastReviewedAt: q.lastReviewedAt ?? null,
+          updatedAt: new Date().toISOString(),
+        };
+        const cleaned = sanitizeForFirestore(rawData);
+        batch.set(doc(db, "questions", q.id), cleaned);
+      }
+      await batch.commit();
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
   }
 }
 
