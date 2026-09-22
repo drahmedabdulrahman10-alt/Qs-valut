@@ -46,4 +46,6 @@ export interface UserPreferences {
   updatedAt: string;
   studyCheckpointQuestionId?: string | null;
   studyCheckpointUpdatedAt?: string | null;
+  flashcardCheckpointQuestionId?: string | null;
+  flashcardCheckpointUpdatedAt?: string | null;
 }

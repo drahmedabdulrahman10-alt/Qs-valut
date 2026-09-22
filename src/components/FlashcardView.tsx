@@ -12,6 +12,7 @@ import {
   HelpCircle,
   Sparkles,
   BookmarkCheck,
+  ArrowRight,
 } from "lucide-react";
 import { Question, QuestionDifficulty } from "../types/question.ts";
 import { useQuestions } from "../context/QuestionsContext.tsx";
@@ -38,6 +39,9 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
     recordReview,
     studyCheckpointQuestionId,
     toggleStudyCheckpoint,
+    flashcardCheckpointQuestionId,
+    flashcardCheckpointQuestion,
+    setFlashcardCheckpoint,
   } = useQuestions();
 
   // Review Pool Filters
@@ -86,6 +90,10 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
     selectedSubject,
   });
   const prevQuestionsCountRef = useRef(0);
+  const checkpointIdRef = useRef<string | null>(flashcardCheckpointQuestionId);
+  checkpointIdRef.current = flashcardCheckpointQuestionId;
+  const hasAutoResumedRef = useRef(false);
+  const isInitializedRef = useRef(false);
 
   useEffect(() => {
     const filtersChanged =
@@ -100,7 +108,24 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
       prevQuestionsCountRef.current = questions.length;
       const filtered = getFilteredQuestions(questions, poolFilter, selectedSubject);
       setDeck(filtered);
-      setCurrentIndex(0);
+
+      const targetId = checkpointIdRef.current;
+      if (targetId) {
+        const targetIdx = filtered.findIndex((q) => q.id === targetId);
+        if (targetIdx !== -1) {
+          setCurrentIndex(targetIdx);
+          hasAutoResumedRef.current = true;
+        } else {
+          // If the checkpoint does not exist in the filtered set, start at 0 but do NOT overwrite saved checkpoint
+          setCurrentIndex(0);
+        }
+      } else {
+        setCurrentIndex(0);
+        if (filtered.length > 0 && !isInitializedRef.current) {
+          isInitializedRef.current = true;
+          setFlashcardCheckpoint(filtered[0].id);
+        }
+      }
       setIsFlipped(false);
     } else if (questions.length !== prevQuestionsCountRef.current) {
       // Questions were deleted or added (total count changed)
@@ -111,14 +136,34 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
     }
     // When a question is rated or starred, questions.length and filters are unchanged,
     // so the deck order and currentIndex remain stable without resetting.
-  }, [questions, poolFilter, selectedSubject, getFilteredQuestions]);
+  }, [questions, poolFilter, selectedSubject, getFilteredQuestions, setFlashcardCheckpoint]);
+
+  // If flashcardCheckpointQuestionId arrives from Firestore after mount, auto-resume if user hasn't navigated yet
+  useEffect(() => {
+    if (!hasAutoResumedRef.current && flashcardCheckpointQuestionId && deck.length > 0) {
+      const targetIdx = deck.findIndex((q) => q.id === flashcardCheckpointQuestionId);
+      if (targetIdx !== -1) {
+        hasAutoResumedRef.current = true;
+        setCurrentIndex(targetIdx);
+        setIsFlipped(false);
+      }
+    }
+  }, [flashcardCheckpointQuestionId, deck]);
 
   // Shuffle deck
   const handleShuffle = () => {
+    hasAutoResumedRef.current = true;
     const shuffled = [...deck].sort(() => Math.random() - 0.5);
     setDeck(shuffled);
-    setCurrentIndex(0);
     setIsFlipped(false);
+    if (flashcardCheckpointQuestionId) {
+      const idx = shuffled.findIndex((q) => q.id === flashcardCheckpointQuestionId);
+      if (idx !== -1) {
+        setCurrentIndex(idx);
+        return;
+      }
+    }
+    setCurrentIndex(0);
   };
 
   // Always resolve the latest live question data from context using the current card's ID
@@ -129,36 +174,51 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
   }, [rawCard, questions]);
 
   const handleNext = useCallback(() => {
+    hasAutoResumedRef.current = true;
     setCurrentIndex((prev) => {
       if (prev < deck.length - 1) {
+        const nextIdx = prev + 1;
         setIsFlipped(false);
-        return prev + 1;
+        if (deck[nextIdx]) {
+          setFlashcardCheckpoint(deck[nextIdx].id);
+        }
+        return nextIdx;
       }
       return prev;
     });
-  }, [deck.length]);
+  }, [deck, setFlashcardCheckpoint]);
 
   const handlePrev = useCallback(() => {
+    hasAutoResumedRef.current = true;
     setCurrentIndex((prev) => {
       if (prev > 0) {
+        const prevIdx = prev - 1;
         setIsFlipped(false);
-        return prev - 1;
+        if (deck[prevIdx]) {
+          setFlashcardCheckpoint(deck[prevIdx].id);
+        }
+        return prevIdx;
       }
       return prev;
     });
-  }, []);
+  }, [deck, setFlashcardCheckpoint]);
 
   const handleRate = useCallback(
     async (difficulty: QuestionDifficulty) => {
       if (!currentCard) return;
+      hasAutoResumedRef.current = true;
 
       // Stably capture the exact question ID being rated
       const targetQuestionId = currentCard.id;
 
-      // Immediately advance to the next card in the deck and un-flip
+      // Immediately advance to the next card in the deck and un-flip, updating checkpoint to newly reached card
       if (currentIndex < deck.length - 1) {
-        setCurrentIndex((prev) => prev + 1);
+        const nextIdx = currentIndex + 1;
+        setCurrentIndex(nextIdx);
         setIsFlipped(false);
+        if (deck[nextIdx]) {
+          setFlashcardCheckpoint(deck[nextIdx].id);
+        }
       }
 
       // Persist the review rating for the target question ID
@@ -168,8 +228,27 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
         console.error("Failed to record review for question:", targetQuestionId, err);
       }
     },
-    [currentCard, currentIndex, deck.length, recordReview]
+    [currentCard, currentIndex, deck, recordReview, setFlashcardCheckpoint]
   );
+
+  const checkpointInCurrentDeck = useMemo(() => {
+    if (!flashcardCheckpointQuestionId) return false;
+    return deck.some((card) => card.id === flashcardCheckpointQuestionId);
+  }, [deck, flashcardCheckpointQuestionId]);
+
+  const jumpToSavedCheckpoint = useCallback(() => {
+    if (!flashcardCheckpointQuestionId) return;
+    const idx = deck.findIndex((q) => q.id === flashcardCheckpointQuestionId);
+    if (idx !== -1) {
+      setCurrentIndex(idx);
+      setIsFlipped(false);
+    }
+  }, [deck, flashcardCheckpointQuestionId]);
+
+  const resetToAllAndResume = useCallback(() => {
+    setPoolFilter("all");
+    setSelectedSubject("all");
+  }, []);
 
   // Keyboard navigation
   useEffect(() => {
@@ -214,6 +293,15 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
         </p>
 
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          {flashcardCheckpointQuestion && (
+            <button
+              onClick={resetToAllAndResume}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 shadow-xs cursor-pointer"
+            >
+              <Layers className="h-4 w-4" />
+              <span>Resume Saved Flashcard ({flashcardCheckpointQuestion.subject || "General"})</span>
+            </button>
+          )}
           {questions.length > 0 ? (
             <button
               onClick={() => {
@@ -284,6 +372,66 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
         </div>
       </div>
 
+      {/* Flashcard Checkpoint Active Banner */}
+      {flashcardCheckpointQuestion && (
+        <div
+          id="flashcard-checkpoint-banner"
+          className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-3.5 sm:p-4 dark:border-indigo-900/60 dark:bg-indigo-950/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-in fade-in duration-200"
+        >
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white dark:bg-indigo-500 dark:text-zinc-950 shadow-xs">
+              <Layers className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
+                  Flashcard Checkpoint Active
+                </span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300">
+                  {flashcardCheckpointQuestion.subject || "General"}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs sm:text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate" dir="auto">
+                {flashcardCheckpointQuestion.question}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {checkpointInCurrentDeck ? (
+              currentCard?.id === flashcardCheckpointQuestion.id ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 text-xs font-semibold">
+                  <BookmarkCheck className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  <span>Currently at Checkpoint (Card {currentIndex + 1} of {deck.length})</span>
+                </div>
+              ) : (
+                <button
+                  id="flashcard-resume-checkpoint-btn"
+                  onClick={jumpToSavedCheckpoint}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-indigo-700 dark:bg-indigo-500 dark:text-zinc-950 dark:hover:bg-indigo-400 transition-colors cursor-pointer"
+                >
+                  <span>Resume Flashcard Where You Stopped</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              )
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-900 px-2.5 py-1 rounded-lg font-medium">
+                  Saved flashcard is not included in current review set
+                </span>
+                <button
+                  onClick={resetToAllAndResume}
+                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors cursor-pointer"
+                >
+                  <span>View in All</span>
+                  <ArrowRight className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Progress Indicator */}
       <div>
         <div className="flex items-center justify-between text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5">
@@ -319,6 +467,27 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
 
             <div className="flex items-center gap-1">
               <button
+                id="flashcard-save-checkpoint-btn"
+                onClick={() => setFlashcardCheckpoint(currentCard.id)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  flashcardCheckpointQuestionId === currentCard.id
+                    ? "text-indigo-600 dark:text-indigo-400"
+                    : "text-zinc-300 hover:text-indigo-600 dark:text-zinc-600 dark:hover:text-indigo-400"
+                }`}
+                title={
+                  flashcardCheckpointQuestionId === currentCard.id
+                    ? "Active Flashcard Checkpoint"
+                    : "Set as Flashcard Checkpoint"
+                }
+              >
+                <Layers
+                  className={`h-5 w-5 ${
+                    flashcardCheckpointQuestionId === currentCard.id ? "fill-indigo-100 dark:fill-indigo-950" : ""
+                  }`}
+                />
+              </button>
+
+              <button
                 id="flashcard-study-checkpoint-btn"
                 onClick={() => toggleStudyCheckpoint(currentCard.id)}
                 className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
@@ -328,8 +497,8 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
                 }`}
                 title={
                   studyCheckpointQuestionId === currentCard.id
-                    ? "Active Study Checkpoint"
-                    : "Mark as Study Checkpoint"
+                    ? "Active Study Checkpoint (All Questions)"
+                    : "Mark as Study Checkpoint (All Questions)"
                 }
               >
                 <BookmarkCheck

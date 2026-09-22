@@ -39,6 +39,7 @@ export function DashboardView({
     studyCheckpointQuestionId,
     studyCheckpointQuestion,
     toggleStudyCheckpoint,
+    flashcardCheckpointQuestion,
   } = useQuestions();
 
   const totalQuestions = questions.length;
@@ -136,6 +137,41 @@ export function DashboardView({
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-xs hover:bg-teal-800 dark:bg-teal-500 dark:text-zinc-950 dark:hover:bg-teal-400 transition-colors shrink-0 cursor-pointer"
           >
             <span>Resume Where You Stopped</span>
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Flashcard Checkpoint Resume Banner */}
+      {flashcardCheckpointQuestion && (
+        <div
+          id="dashboard-flashcard-checkpoint-card"
+          className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 sm:p-5 dark:border-indigo-900/60 dark:bg-indigo-950/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs animate-in fade-in duration-200"
+        >
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white dark:bg-indigo-500 dark:text-zinc-950 shadow-xs">
+              <Layers className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
+                  Flashcard Checkpoint Active
+                </span>
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300">
+                  {flashcardCheckpointQuestion.subject || "General"}
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100 line-clamp-1" dir="auto">
+                {flashcardCheckpointQuestion.question}
+              </p>
+            </div>
+          </div>
+          <button
+            id="dashboard-resume-flashcard-btn"
+            onClick={onNavigateToReview}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-xs hover:bg-indigo-700 dark:bg-indigo-500 dark:text-zinc-950 dark:hover:bg-indigo-400 transition-colors shrink-0 cursor-pointer"
+          >
+            <span>Resume Flashcard Where You Stopped</span>
             <ArrowRight className="h-4 w-4" />
           </button>
         </div>

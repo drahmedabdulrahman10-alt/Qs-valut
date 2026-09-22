@@ -324,9 +324,31 @@ export async function saveUserStudyCheckpoint(
   }
 }
 
+export async function saveUserFlashcardCheckpoint(
+  userId: string,
+  questionId: string | null
+): Promise<void> {
+  const path = `users/${userId}`;
+  try {
+    const payload = {
+      userId,
+      flashcardCheckpointQuestionId: questionId || null,
+      flashcardCheckpointUpdatedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, "users", userId), payload, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
 export function subscribeToUserProfile(
   userId: string,
-  onData: (profile: { subjects: string[]; studyCheckpointQuestionId: string | null }) => void,
+  onData: (profile: {
+    subjects: string[];
+    studyCheckpointQuestionId: string | null;
+    flashcardCheckpointQuestionId: string | null;
+  }) => void,
   onError?: (error: Error) => void
 ): () => void {
   const path = `users/${userId}`;
@@ -340,9 +362,22 @@ export function subscribeToUserProfile(
           typeof data.studyCheckpointQuestionId === "string" && data.studyCheckpointQuestionId.trim()
             ? data.studyCheckpointQuestionId.trim()
             : null;
-        onData({ subjects: subs, studyCheckpointQuestionId: checkpointId });
+        const flashcardCheckpointId: string | null =
+          typeof data.flashcardCheckpointQuestionId === "string" &&
+          data.flashcardCheckpointQuestionId.trim()
+            ? data.flashcardCheckpointQuestionId.trim()
+            : null;
+        onData({
+          subjects: subs,
+          studyCheckpointQuestionId: checkpointId,
+          flashcardCheckpointQuestionId: flashcardCheckpointId,
+        });
       } else {
-        onData({ subjects: [], studyCheckpointQuestionId: null });
+        onData({
+          subjects: [],
+          studyCheckpointQuestionId: null,
+          flashcardCheckpointQuestionId: null,
+        });
       }
     },
     (error) => {

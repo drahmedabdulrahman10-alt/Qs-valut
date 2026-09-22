@@ -9,6 +9,7 @@ import {
   subscribeToUserQuestions,
   saveUserSubjects,
   saveUserStudyCheckpoint,
+  saveUserFlashcardCheckpoint,
   subscribeToUserProfile,
 } from "../lib/firebase.ts";
 import { useAuth } from "./AuthContext.tsx";
@@ -48,6 +49,9 @@ interface QuestionsContextType {
   studyCheckpointQuestion: Question | null;
   setStudyCheckpoint: (questionId: string | null) => Promise<void>;
   toggleStudyCheckpoint: (questionId: string) => Promise<void>;
+  flashcardCheckpointQuestionId: string | null;
+  flashcardCheckpointQuestion: Question | null;
+  setFlashcardCheckpoint: (questionId: string | null) => Promise<void>;
 }
 
 const QuestionsContext = createContext<QuestionsContextType | undefined>(undefined);
@@ -67,6 +71,7 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [studyCheckpointQuestionId, setStudyCheckpointQuestionId] = useState<string | null>(null);
+  const [flashcardCheckpointQuestionId, setFlashcardCheckpointQuestionId] = useState<string | null>(null);
 
   // Subscribe to Questions
   useEffect(() => {
@@ -93,19 +98,24 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribeQuestions();
   }, [user]);
 
-  // Subscribe to User's Profile (Subjects + Study Checkpoint)
+  // Subscribe to User's Profile (Subjects + Study Checkpoint + Flashcard Checkpoint)
   useEffect(() => {
     if (!user) {
       setUserSubjects(DEFAULT_PREDEFINED_SUBJECTS);
       setStudyCheckpointQuestionId(null);
+      setFlashcardCheckpointQuestionId(null);
       return;
     }
 
-    // Hydrate cached checkpoint for this user immediately if present
+    // Hydrate cached checkpoints for this user immediately if present
     try {
-      const cached = localStorage.getItem(`study_checkpoint_${user.uid}`);
-      if (cached) {
-        setStudyCheckpointQuestionId(cached);
+      const cachedStudy = localStorage.getItem(`study_checkpoint_${user.uid}`);
+      if (cachedStudy) {
+        setStudyCheckpointQuestionId(cachedStudy);
+      }
+      const cachedFlashcard = localStorage.getItem(`flashcard_checkpoint_${user.uid}`);
+      if (cachedFlashcard) {
+        setFlashcardCheckpointQuestionId(cachedFlashcard);
       }
     } catch {}
 
@@ -122,13 +132,23 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
           );
         }
 
-        // Sync study checkpoint from cloud Firestore
+        // Sync normal study checkpoint from cloud Firestore
         setStudyCheckpointQuestionId(profile.studyCheckpointQuestionId);
         try {
           if (profile.studyCheckpointQuestionId) {
             localStorage.setItem(`study_checkpoint_${user.uid}`, profile.studyCheckpointQuestionId);
           } else {
             localStorage.removeItem(`study_checkpoint_${user.uid}`);
+          }
+        } catch {}
+
+        // Sync flashcard checkpoint from cloud Firestore
+        setFlashcardCheckpointQuestionId(profile.flashcardCheckpointQuestionId);
+        try {
+          if (profile.flashcardCheckpointQuestionId) {
+            localStorage.setItem(`flashcard_checkpoint_${user.uid}`, profile.flashcardCheckpointQuestionId);
+          } else {
+            localStorage.removeItem(`flashcard_checkpoint_${user.uid}`);
           }
         } catch {}
       },
@@ -368,20 +388,53 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
     [studyCheckpointQuestionId, setStudyCheckpoint]
   );
 
-  // Automatically clear stale checkpoint if the saved question no longer exists in questions list
+  const setFlashcardCheckpoint = useCallback(
+    async (questionId: string | null) => {
+      const cleanId = questionId && questionId.trim() ? questionId.trim() : null;
+      setFlashcardCheckpointQuestionId(cleanId);
+      if (user) {
+        try {
+          if (cleanId) {
+            localStorage.setItem(`flashcard_checkpoint_${user.uid}`, cleanId);
+          } else {
+            localStorage.removeItem(`flashcard_checkpoint_${user.uid}`);
+          }
+        } catch {}
+        await saveUserFlashcardCheckpoint(user.uid, cleanId);
+      }
+    },
+    [user]
+  );
+
+  // Automatically clear stale checkpoints if the saved questions no longer exist in questions list
   useEffect(() => {
-    if (!loading && questions.length > 0 && studyCheckpointQuestionId) {
-      const exists = questions.some((q) => q.id === studyCheckpointQuestionId);
-      if (!exists) {
-        setStudyCheckpoint(null).catch((e) => console.warn("Failed to clear stale checkpoint:", e));
+    if (!loading && questions.length > 0) {
+      if (studyCheckpointQuestionId) {
+        const exists = questions.some((q) => q.id === studyCheckpointQuestionId);
+        if (!exists) {
+          setStudyCheckpoint(null).catch((e) => console.warn("Failed to clear stale study checkpoint:", e));
+        }
+      }
+      if (flashcardCheckpointQuestionId) {
+        const flashcardExists = questions.some((q) => q.id === flashcardCheckpointQuestionId);
+        if (!flashcardExists) {
+          setFlashcardCheckpoint(null).catch((e) =>
+            console.warn("Failed to clear stale flashcard checkpoint:", e)
+          );
+        }
       }
     }
-  }, [loading, questions, studyCheckpointQuestionId, setStudyCheckpoint]);
+  }, [loading, questions, studyCheckpointQuestionId, flashcardCheckpointQuestionId, setStudyCheckpoint, setFlashcardCheckpoint]);
 
   const studyCheckpointQuestion = useMemo(() => {
     if (!studyCheckpointQuestionId) return null;
     return questions.find((q) => q.id === studyCheckpointQuestionId) || null;
   }, [questions, studyCheckpointQuestionId]);
+
+  const flashcardCheckpointQuestion = useMemo(() => {
+    if (!flashcardCheckpointQuestionId) return null;
+    return questions.find((q) => q.id === flashcardCheckpointQuestionId) || null;
+  }, [questions, flashcardCheckpointQuestionId]);
 
   const updateQuestion = async (id: string, updates: Partial<Question>) => {
     await updateExistingQuestion(id, updates);
@@ -391,6 +444,9 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
     if (studyCheckpointQuestionId === id) {
       await setStudyCheckpoint(null);
     }
+    if (flashcardCheckpointQuestionId === id) {
+      await setFlashcardCheckpoint(null);
+    }
     await removeQuestion(id);
   };
 
@@ -398,6 +454,9 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
     if (!ids || ids.length === 0) return 0;
     if (studyCheckpointQuestionId && ids.includes(studyCheckpointQuestionId)) {
       await setStudyCheckpoint(null);
+    }
+    if (flashcardCheckpointQuestionId && ids.includes(flashcardCheckpointQuestionId)) {
+      await setFlashcardCheckpoint(null);
     }
     await batchDeleteQuestions(ids);
     return ids.length;
@@ -448,6 +507,9 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
         studyCheckpointQuestion,
         setStudyCheckpoint,
         toggleStudyCheckpoint,
+        flashcardCheckpointQuestionId,
+        flashcardCheckpointQuestion,
+        setFlashcardCheckpoint,
       }}
     >
       {children}
