@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Layers,
   Star,
@@ -11,20 +11,37 @@ import {
   BookOpen,
   HelpCircle,
   Sparkles,
+  BookmarkCheck,
 } from "lucide-react";
 import { Question, QuestionDifficulty } from "../types/question.ts";
 import { useQuestions } from "../context/QuestionsContext.tsx";
 import { FormattedAnswerView } from "./FormattedAnswerView.tsx";
 
+export type PoolFilter = "all" | "oldest" | "newest" | "needs_review" | "important";
+
 interface FlashcardViewProps {
   onNavigateToAdd: () => void;
 }
 
+// Safely convert date string into numeric timestamp
+function getQuestionTimestamp(dateStr?: string | null): number {
+  if (!dateStr || typeof dateStr !== "string") return 0;
+  const time = new Date(dateStr).getTime();
+  return isNaN(time) ? 0 : time;
+}
+
 export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
-  const { questions, subjects, toggleImportant, recordReview } = useQuestions();
+  const {
+    questions,
+    subjects,
+    toggleImportant,
+    recordReview,
+    studyCheckpointQuestionId,
+    toggleStudyCheckpoint,
+  } = useQuestions();
 
   // Review Pool Filters
-  const [poolFilter, setPoolFilter] = useState<"all" | "needs_review" | "important">("all");
+  const [poolFilter, setPoolFilter] = useState<PoolFilter>("all");
   const [selectedSubject, setSelectedSubject] = useState<string>("all");
 
   // Deck state
@@ -32,24 +49,69 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
 
-  // Filter pool questions
-  const filteredPool = useMemo(() => {
-    return questions.filter((q) => {
-      if (poolFilter === "important" && !q.important) return false;
-      if (poolFilter === "needs_review" && q.reviewCount > 0 && q.difficulty !== "hard") {
-        return false;
-      }
-      if (selectedSubject !== "all" && q.subject !== selectedSubject) return false;
-      return true;
-    });
-  }, [questions, poolFilter, selectedSubject]);
+  // Filter and sort pool questions based on filters
+  const getFilteredQuestions = useCallback(
+    (source: Question[], filter: PoolFilter, subject: string) => {
+      const filtered = source.filter((q) => {
+        if (filter === "important" && !q.important) return false;
+        if (filter === "needs_review" && q.reviewCount > 0 && q.difficulty !== "hard") {
+          return false;
+        }
+        if (subject !== "all" && q.subject !== subject) return false;
+        return true;
+      });
 
-  // Sync deck when filtered pool changes
+      if (filter === "oldest") {
+        return [...filtered].sort((a, b) => {
+          const diff = getQuestionTimestamp(a.createdAt) - getQuestionTimestamp(b.createdAt);
+          return diff !== 0 ? diff : a.id.localeCompare(b.id);
+        });
+      }
+
+      if (filter === "newest") {
+        return [...filtered].sort((a, b) => {
+          const diff = getQuestionTimestamp(b.createdAt) - getQuestionTimestamp(a.createdAt);
+          return diff !== 0 ? diff : b.id.localeCompare(a.id);
+        });
+      }
+
+      return filtered;
+    },
+    []
+  );
+
+  // Track previous filters and question count to only rebuild deck when filters change or initial load completes
+  const prevFilterRef = useRef<{ poolFilter: PoolFilter; selectedSubject: string }>({
+    poolFilter,
+    selectedSubject,
+  });
+  const prevQuestionsCountRef = useRef(0);
+
   useEffect(() => {
-    setDeck(filteredPool);
-    setCurrentIndex(0);
-    setIsFlipped(false);
-  }, [filteredPool]);
+    const filtersChanged =
+      prevFilterRef.current.poolFilter !== poolFilter ||
+      prevFilterRef.current.selectedSubject !== selectedSubject;
+
+    const initialDataLoaded =
+      prevQuestionsCountRef.current === 0 && questions.length > 0;
+
+    if (filtersChanged || initialDataLoaded) {
+      prevFilterRef.current = { poolFilter, selectedSubject };
+      prevQuestionsCountRef.current = questions.length;
+      const filtered = getFilteredQuestions(questions, poolFilter, selectedSubject);
+      setDeck(filtered);
+      setCurrentIndex(0);
+      setIsFlipped(false);
+    } else if (questions.length !== prevQuestionsCountRef.current) {
+      // Questions were deleted or added (total count changed)
+      prevQuestionsCountRef.current = questions.length;
+      const validIds = new Set(questions.map((q) => q.id));
+      setDeck((prevDeck) => prevDeck.filter((card) => validIds.has(card.id)));
+      setCurrentIndex((prevIndex) => Math.min(prevIndex, Math.max(0, questions.length - 1)));
+    }
+    // When a question is rated or starred, questions.length and filters are unchanged,
+    // so the deck order and currentIndex remain stable without resetting.
+  }, [questions, poolFilter, selectedSubject, getFilteredQuestions]);
 
   // Shuffle deck
   const handleShuffle = () => {
@@ -59,30 +121,55 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
     setIsFlipped(false);
   };
 
-  const currentCard = deck[currentIndex];
+  // Always resolve the latest live question data from context using the current card's ID
+  const rawCard = deck[currentIndex];
+  const currentCard = useMemo(() => {
+    if (!rawCard) return undefined;
+    return questions.find((q) => q.id === rawCard.id) || rawCard;
+  }, [rawCard, questions]);
 
   const handleNext = useCallback(() => {
-    if (currentIndex < deck.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-      setIsFlipped(false);
-    }
-  }, [currentIndex, deck.length]);
+    setCurrentIndex((prev) => {
+      if (prev < deck.length - 1) {
+        setIsFlipped(false);
+        return prev + 1;
+      }
+      return prev;
+    });
+  }, [deck.length]);
 
   const handlePrev = useCallback(() => {
-    if (currentIndex > 0) {
-      setCurrentIndex((prev) => prev - 1);
-      setIsFlipped(false);
-    }
-  }, [currentIndex]);
+    setCurrentIndex((prev) => {
+      if (prev > 0) {
+        setIsFlipped(false);
+        return prev - 1;
+      }
+      return prev;
+    });
+  }, []);
 
-  const handleRate = async (difficulty: QuestionDifficulty) => {
-    if (!currentCard) return;
-    await recordReview(currentCard.id, difficulty);
-    // Smoothly transition to next card if available
-    if (currentIndex < deck.length - 1) {
-      handleNext();
-    }
-  };
+  const handleRate = useCallback(
+    async (difficulty: QuestionDifficulty) => {
+      if (!currentCard) return;
+
+      // Stably capture the exact question ID being rated
+      const targetQuestionId = currentCard.id;
+
+      // Immediately advance to the next card in the deck and un-flip
+      if (currentIndex < deck.length - 1) {
+        setCurrentIndex((prev) => prev + 1);
+        setIsFlipped(false);
+      }
+
+      // Persist the review rating for the target question ID
+      try {
+        await recordReview(targetQuestionId, difficulty);
+      } catch (err) {
+        console.error("Failed to record review for question:", targetQuestionId, err);
+      }
+    },
+    [currentCard, currentIndex, deck.length, recordReview]
+  );
 
   // Keyboard navigation
   useEffect(() => {
@@ -109,7 +196,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isFlipped, handleNext, handlePrev, currentCard]);
+  }, [isFlipped, handleNext, handlePrev, handleRate]);
 
   if (deck.length === 0) {
     return (
@@ -159,11 +246,14 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-4 dark:border-zinc-800">
         <div className="flex flex-wrap items-center gap-2">
           <select
+            id="flashcard-pool-filter-select"
             value={poolFilter}
-            onChange={(e) => setPoolFilter(e.target.value as any)}
-            className="rounded-lg border border-zinc-200 bg-white py-1.5 px-3 text-xs font-medium text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 shadow-xs"
+            onChange={(e) => setPoolFilter(e.target.value as PoolFilter)}
+            className="rounded-lg border border-zinc-200 bg-white py-1.5 px-3 text-xs font-medium text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 shadow-xs cursor-pointer"
           >
             <option value="all">All Questions ({questions.length})</option>
+            <option value="oldest">Oldest Flashcards</option>
+            <option value="newest">Newest Flashcards</option>
             <option value="needs_review">Needs Review</option>
             <option value="important">Important Only ⭐</option>
           </select>
@@ -227,17 +317,40 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
               </span>
             </div>
 
-            <button
-              onClick={() => toggleImportant(currentCard.id)}
-              className={`p-1.5 rounded-lg transition-colors ${
-                currentCard.important
-                  ? "text-amber-500 hover:text-amber-600"
-                  : "text-zinc-300 hover:text-amber-500 dark:text-zinc-600"
-              }`}
-              title={currentCard.important ? "Starred as Important" : "Mark as Important"}
-            >
-              <Star className={`h-5 w-5 ${currentCard.important ? "fill-current" : ""}`} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                id="flashcard-study-checkpoint-btn"
+                onClick={() => toggleStudyCheckpoint(currentCard.id)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  studyCheckpointQuestionId === currentCard.id
+                    ? "text-teal-600 dark:text-teal-400"
+                    : "text-zinc-300 hover:text-teal-600 dark:text-zinc-600 dark:hover:text-teal-400"
+                }`}
+                title={
+                  studyCheckpointQuestionId === currentCard.id
+                    ? "Active Study Checkpoint"
+                    : "Mark as Study Checkpoint"
+                }
+              >
+                <BookmarkCheck
+                  className={`h-5 w-5 ${
+                    studyCheckpointQuestionId === currentCard.id ? "fill-current" : ""
+                  }`}
+                />
+              </button>
+
+              <button
+                onClick={() => toggleImportant(currentCard.id)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  currentCard.important
+                    ? "text-amber-500 hover:text-amber-600"
+                    : "text-zinc-300 hover:text-amber-500 dark:text-zinc-600"
+                }`}
+                title={currentCard.important ? "Starred as Important" : "Mark as Important"}
+              >
+                <Star className={`h-5 w-5 ${currentCard.important ? "fill-current" : ""}`} />
+              </button>
+            </div>
           </div>
 
           {/* Question Text */}
