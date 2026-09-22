@@ -8,7 +8,8 @@ import {
   batchDeleteQuestions,
   subscribeToUserQuestions,
   saveUserSubjects,
-  subscribeToUserSubjects,
+  saveUserStudyCheckpoint,
+  subscribeToUserProfile,
 } from "../lib/firebase.ts";
 import { useAuth } from "./AuthContext.tsx";
 
@@ -43,6 +44,10 @@ interface QuestionsContextType {
   addUserSubject: (name: string) => Promise<string>;
   renameUserSubject: (oldName: string, newName: string) => Promise<void>;
   deleteUserSubject: (name: string) => Promise<void>;
+  studyCheckpointQuestionId: string | null;
+  studyCheckpointQuestion: Question | null;
+  setStudyCheckpoint: (questionId: string | null) => Promise<void>;
+  toggleStudyCheckpoint: (questionId: string) => Promise<void>;
 }
 
 const QuestionsContext = createContext<QuestionsContextType | undefined>(undefined);
@@ -61,6 +66,7 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
   const [userSubjects, setUserSubjects] = useState<string[]>(DEFAULT_PREDEFINED_SUBJECTS);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [studyCheckpointQuestionId, setStudyCheckpointQuestionId] = useState<string | null>(null);
 
   // Subscribe to Questions
   useEffect(() => {
@@ -87,18 +93,27 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribeQuestions();
   }, [user]);
 
-  // Subscribe to User's Subjects
+  // Subscribe to User's Profile (Subjects + Study Checkpoint)
   useEffect(() => {
     if (!user) {
       setUserSubjects(DEFAULT_PREDEFINED_SUBJECTS);
+      setStudyCheckpointQuestionId(null);
       return;
     }
 
-    const unsubscribeSubjects = subscribeToUserSubjects(
+    // Hydrate cached checkpoint for this user immediately if present
+    try {
+      const cached = localStorage.getItem(`study_checkpoint_${user.uid}`);
+      if (cached) {
+        setStudyCheckpointQuestionId(cached);
+      }
+    } catch {}
+
+    const unsubscribeProfile = subscribeToUserProfile(
       user.uid,
-      (savedSubjects) => {
-        if (savedSubjects && savedSubjects.length > 0) {
-          setUserSubjects(savedSubjects);
+      (profile) => {
+        if (profile.subjects && profile.subjects.length > 0) {
+          setUserSubjects(profile.subjects);
         } else {
           // If the user has no saved subjects yet, seed with defaults
           setUserSubjects(DEFAULT_PREDEFINED_SUBJECTS);
@@ -106,13 +121,23 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
             console.warn("Failed to seed initial subjects in Firestore:", err)
           );
         }
+
+        // Sync study checkpoint from cloud Firestore
+        setStudyCheckpointQuestionId(profile.studyCheckpointQuestionId);
+        try {
+          if (profile.studyCheckpointQuestionId) {
+            localStorage.setItem(`study_checkpoint_${user.uid}`, profile.studyCheckpointQuestionId);
+          } else {
+            localStorage.removeItem(`study_checkpoint_${user.uid}`);
+          }
+        } catch {}
       },
       (err) => {
-        console.error("Subjects subscription error:", err);
+        console.error("Profile subscription error:", err);
       }
     );
 
-    return () => unsubscribeSubjects();
+    return () => unsubscribeProfile();
   }, [user]);
 
   // Calculate subjects with dynamic counts from user's actual Firestore questions
@@ -314,16 +339,66 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
     return questionsToSave.length;
   };
 
+  const setStudyCheckpoint = useCallback(
+    async (questionId: string | null) => {
+      const cleanId = questionId && questionId.trim() ? questionId.trim() : null;
+      setStudyCheckpointQuestionId(cleanId);
+      if (user) {
+        try {
+          if (cleanId) {
+            localStorage.setItem(`study_checkpoint_${user.uid}`, cleanId);
+          } else {
+            localStorage.removeItem(`study_checkpoint_${user.uid}`);
+          }
+        } catch {}
+        await saveUserStudyCheckpoint(user.uid, cleanId);
+      }
+    },
+    [user]
+  );
+
+  const toggleStudyCheckpoint = useCallback(
+    async (questionId: string) => {
+      if (studyCheckpointQuestionId === questionId) {
+        await setStudyCheckpoint(null);
+      } else {
+        await setStudyCheckpoint(questionId);
+      }
+    },
+    [studyCheckpointQuestionId, setStudyCheckpoint]
+  );
+
+  // Automatically clear stale checkpoint if the saved question no longer exists in questions list
+  useEffect(() => {
+    if (!loading && questions.length > 0 && studyCheckpointQuestionId) {
+      const exists = questions.some((q) => q.id === studyCheckpointQuestionId);
+      if (!exists) {
+        setStudyCheckpoint(null).catch((e) => console.warn("Failed to clear stale checkpoint:", e));
+      }
+    }
+  }, [loading, questions, studyCheckpointQuestionId, setStudyCheckpoint]);
+
+  const studyCheckpointQuestion = useMemo(() => {
+    if (!studyCheckpointQuestionId) return null;
+    return questions.find((q) => q.id === studyCheckpointQuestionId) || null;
+  }, [questions, studyCheckpointQuestionId]);
+
   const updateQuestion = async (id: string, updates: Partial<Question>) => {
     await updateExistingQuestion(id, updates);
   };
 
   const deleteQuestion = async (id: string) => {
+    if (studyCheckpointQuestionId === id) {
+      await setStudyCheckpoint(null);
+    }
     await removeQuestion(id);
   };
 
   const bulkDeleteQuestions = async (ids: string[]): Promise<number> => {
     if (!ids || ids.length === 0) return 0;
+    if (studyCheckpointQuestionId && ids.includes(studyCheckpointQuestionId)) {
+      await setStudyCheckpoint(null);
+    }
     await batchDeleteQuestions(ids);
     return ids.length;
   };
@@ -369,6 +444,10 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
         addUserSubject,
         renameUserSubject,
         deleteUserSubject,
+        studyCheckpointQuestionId,
+        studyCheckpointQuestion,
+        setStudyCheckpoint,
+        toggleStudyCheckpoint,
       }}
     >
       {children}

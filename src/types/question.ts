@@ -44,4 +44,6 @@ export interface UserPreferences {
   userId: string;
   recentSubjects: string[];
   updatedAt: string;
+  studyCheckpointQuestionId?: string | null;
+  studyCheckpointUpdatedAt?: string | null;
 }

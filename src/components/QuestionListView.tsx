@@ -14,6 +14,8 @@ import {
   Square,
   AlertTriangle,
   Sparkles,
+  BookmarkCheck,
+  Bookmark,
 } from "lucide-react";
 import { Question, QuestionType, QuestionDifficulty } from "../types/question.ts";
 import { useQuestions } from "../context/QuestionsContext.tsx";
@@ -42,6 +44,10 @@ export function QuestionListView({
     deleteQuestion,
     bulkDeleteQuestions,
     updateQuestion,
+    studyCheckpointQuestionId,
+    studyCheckpointQuestion,
+    toggleStudyCheckpoint,
+    setStudyCheckpoint,
   } = useQuestions();
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -67,6 +73,62 @@ export function QuestionListView({
   // Formatting state
   const [formattingQuestion, setFormattingQuestion] = useState<Question | null>(null);
   const [isBulkFormatting, setIsBulkFormatting] = useState<boolean>(false);
+
+  // Study Checkpoint state
+  const [highlightedQuestionId, setHighlightedQuestionId] = useState<string | null>(null);
+  const [checkpointNotice, setCheckpointNotice] = useState<{ message: string; type: "success" | "info" } | null>(null);
+
+  const handleContinueWhereStopped = () => {
+    if (!studyCheckpointQuestionId) {
+      setCheckpointNotice({
+        message: "No study checkpoint saved yet. Tap the bookmark icon on any question to mark where you stopped studying.",
+        type: "info",
+      });
+      setTimeout(() => setCheckpointNotice(null), 5000);
+      return;
+    }
+
+    const targetQuestion = questions.find((q) => q.id === studyCheckpointQuestionId);
+    if (!targetQuestion) {
+      setCheckpointNotice({
+        message: "The saved study checkpoint question is no longer in your vault.",
+        type: "info",
+      });
+      setStudyCheckpoint(null);
+      setTimeout(() => setCheckpointNotice(null), 4000);
+      return;
+    }
+
+    // If active filters hide the checkpoint question, clear them so the element is rendered
+    const isVisibleInFiltered = filteredQuestions.some((q) => q.id === studyCheckpointQuestionId);
+    if (!isVisibleInFiltered) {
+      clearAllFilters();
+    }
+
+    const questionIndex = questions.findIndex((q) => q.id === studyCheckpointQuestionId) + 1;
+    setCheckpointNotice({
+      message: `Resumed from Study Checkpoint: Question #${questionIndex} (${targetQuestion.subject || "General"})`,
+      type: "success",
+    });
+    setHighlightedQuestionId(studyCheckpointQuestionId);
+
+    // Smooth scroll to the target question card
+    setTimeout(() => {
+      const el = document.getElementById(`question-card-${studyCheckpointQuestionId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 120);
+
+    // Remove highlight after 3.5s
+    setTimeout(() => {
+      setHighlightedQuestionId(null);
+    }, 3500);
+
+    setTimeout(() => {
+      setCheckpointNotice(null);
+    }, 5000);
+  };
 
   // Filtered and sorted questions
   const filteredQuestions = useMemo(() => {
@@ -220,7 +282,36 @@ export function QuestionListView({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <button
+            id="continue-study-checkpoint-btn"
+            type="button"
+            onClick={handleContinueWhereStopped}
+            className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs sm:text-sm font-semibold transition-colors cursor-pointer ${
+              studyCheckpointQuestionId
+                ? "border-teal-300 bg-teal-50 text-teal-800 hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-300 dark:hover:bg-teal-900/50 shadow-xs"
+                : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-750"
+            }`}
+            title={
+              studyCheckpointQuestionId
+                ? "Continue where you stopped studying"
+                : "No checkpoint saved yet (tap bookmark on any question)"
+            }
+          >
+            <BookmarkCheck
+              className={`h-4 w-4 ${
+                studyCheckpointQuestionId ? "text-teal-600 dark:text-teal-400 fill-current" : "text-zinc-400"
+              }`}
+            />
+            <span>Continue Where I Stopped</span>
+            {studyCheckpointQuestionId && (
+              <span className="relative flex h-2 w-2 ml-0.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
+              </span>
+            )}
+          </button>
+
           {filteredQuestions.length > 0 && (
             <button
               id="select-all-btn"
@@ -250,6 +341,28 @@ export function QuestionListView({
           </button>
         </div>
       </div>
+
+      {checkpointNotice && (
+        <div
+          id="checkpoint-notice-banner"
+          className={`rounded-xl border p-3 text-xs font-medium flex items-center justify-between animate-in fade-in duration-200 ${
+            checkpointNotice.type === "success"
+              ? "border-teal-200 bg-teal-50 text-teal-800 dark:border-teal-900/60 dark:bg-teal-950/40 dark:text-teal-300"
+              : "border-zinc-200 bg-zinc-50 text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <BookmarkCheck className="h-4 w-4 shrink-0 text-teal-600 dark:text-teal-400" />
+            <span>{checkpointNotice.message}</span>
+          </div>
+          <button
+            onClick={() => setCheckpointNotice(null)}
+            className="text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer p-1"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {bulkActionNotice && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-between">
@@ -467,6 +580,9 @@ export function QuestionListView({
               selected={selectedIds.has(q.id)}
               onToggleSelect={handleToggleSelect}
               defaultAnswerVisible={false}
+              isStudyCheckpoint={studyCheckpointQuestionId === q.id}
+              onToggleStudyCheckpoint={toggleStudyCheckpoint}
+              isHighlighted={highlightedQuestionId === q.id}
             />
           ))}
         </div>

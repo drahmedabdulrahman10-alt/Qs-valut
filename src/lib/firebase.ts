@@ -306,6 +306,52 @@ export async function saveUserSubjects(userId: string, subjects: string[]): Prom
   }
 }
 
+export async function saveUserStudyCheckpoint(
+  userId: string,
+  questionId: string | null
+): Promise<void> {
+  const path = `users/${userId}`;
+  try {
+    const payload = {
+      userId,
+      studyCheckpointQuestionId: questionId || null,
+      studyCheckpointUpdatedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, "users", userId), payload, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeToUserProfile(
+  userId: string,
+  onData: (profile: { subjects: string[]; studyCheckpointQuestionId: string | null }) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const path = `users/${userId}`;
+  return onSnapshot(
+    doc(db, "users", userId),
+    (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const subs: string[] = Array.isArray(data.subjects) ? data.subjects : [];
+        const checkpointId: string | null =
+          typeof data.studyCheckpointQuestionId === "string" && data.studyCheckpointQuestionId.trim()
+            ? data.studyCheckpointQuestionId.trim()
+            : null;
+        onData({ subjects: subs, studyCheckpointQuestionId: checkpointId });
+      } else {
+        onData({ subjects: [], studyCheckpointQuestionId: null });
+      }
+    },
+    (error) => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  );
+}
+
 export function subscribeToUserSubjects(
   userId: string,
   onData: (subjects: string[]) => void,

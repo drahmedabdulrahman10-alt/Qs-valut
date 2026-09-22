@@ -11,6 +11,7 @@ import {
   Clock,
   ChevronRight,
   HelpCircle,
+  BookmarkCheck,
 } from "lucide-react";
 import { useQuestions } from "../context/QuestionsContext.tsx";
 import { QuestionCard } from "./QuestionCard.tsx";
@@ -29,7 +30,16 @@ export function DashboardView({
   onNavigateToListWithFilter,
   onEditQuestion,
 }: DashboardViewProps) {
-  const { questions, subjects, toggleImportant, deleteQuestion, loading } = useQuestions();
+  const {
+    questions,
+    subjects,
+    toggleImportant,
+    deleteQuestion,
+    loading,
+    studyCheckpointQuestionId,
+    studyCheckpointQuestion,
+    toggleStudyCheckpoint,
+  } = useQuestions();
 
   const totalQuestions = questions.length;
   const importantCount = questions.filter((q) => q.important).length;
@@ -87,6 +97,49 @@ export function DashboardView({
           )}
         </div>
       </div>
+
+      {/* Study Checkpoint Resume Banner */}
+      {studyCheckpointQuestion && (
+        <div
+          id="dashboard-study-checkpoint-card"
+          className="rounded-2xl border border-teal-200 bg-teal-50/70 p-4 sm:p-5 dark:border-teal-900/60 dark:bg-teal-950/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs animate-in fade-in duration-200"
+        >
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white dark:bg-teal-500 dark:text-zinc-950 shadow-xs">
+              <BookmarkCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300">
+                  Study Checkpoint Active
+                </span>
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-teal-100 text-teal-800 dark:bg-teal-900/60 dark:text-teal-300">
+                  {studyCheckpointQuestion.subject || "General"}
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100 line-clamp-1" dir="auto">
+                {studyCheckpointQuestion.question}
+              </p>
+            </div>
+          </div>
+          <button
+            id="dashboard-resume-checkpoint-btn"
+            onClick={() => {
+              onNavigateToListWithFilter();
+              setTimeout(() => {
+                const el = document.getElementById(`question-card-${studyCheckpointQuestion.id}`);
+                if (el) {
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                }
+              }, 200);
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-xs hover:bg-teal-800 dark:bg-teal-500 dark:text-zinc-950 dark:hover:bg-teal-400 transition-colors shrink-0 cursor-pointer"
+          >
+            <span>Resume Where You Stopped</span>
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Metrics Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -244,6 +297,8 @@ export function DashboardView({
                   onEdit={onEditQuestion}
                   onDelete={deleteQuestion}
                   defaultAnswerVisible={false}
+                  isStudyCheckpoint={studyCheckpointQuestionId === q.id}
+                  onToggleStudyCheckpoint={toggleStudyCheckpoint}
                 />
               ))}
             </div>

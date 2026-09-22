@@ -16,6 +16,8 @@ import {
   Clock,
   Sparkles,
   BookOpen,
+  Bookmark,
+  BookmarkCheck,
 } from "lucide-react";
 import { Question } from "../types/question.ts";
 import { FormattedAnswerView } from "./FormattedAnswerView.tsx";
@@ -31,6 +33,9 @@ interface QuestionCardProps {
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
   selectable?: boolean;
+  isStudyCheckpoint?: boolean;
+  onToggleStudyCheckpoint?: (id: string) => void;
+  isHighlighted?: boolean;
 }
 
 export function QuestionCard({
@@ -43,6 +48,9 @@ export function QuestionCard({
   selected = false,
   onToggleSelect,
   selectable = false,
+  isStudyCheckpoint = false,
+  onToggleStudyCheckpoint,
+  isHighlighted = false,
 }: QuestionCardProps) {
   const [showAnswer, setShowAnswer] = useState(defaultAnswerVisible);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -105,10 +113,14 @@ export function QuestionCard({
   return (
     <article
       id={`question-card-${question.id}`}
-      className={`rounded-2xl border transition-all hover:shadow-sm p-5 sm:p-6 shadow-xs ${
-        selected
+      className={`rounded-2xl border transition-all p-5 sm:p-6 shadow-xs ${
+        isHighlighted
+          ? "ring-4 ring-teal-400/80 dark:ring-teal-400/70 border-teal-500 bg-teal-50/20 dark:bg-teal-950/20 shadow-md scale-[1.01]"
+          : isStudyCheckpoint
+          ? "border-teal-300 dark:border-teal-700 bg-white dark:bg-zinc-900 shadow-xs"
+          : selected
           ? "border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:border-indigo-500 dark:ring-indigo-500/30 dark:bg-indigo-950/20"
-          : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+          : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 hover:shadow-sm"
       }`}
     >
       {/* Top Meta Bar */}
@@ -129,6 +141,15 @@ export function QuestionCard({
                 aria-label={`Select question ${question.question.substring(0, 30)}`}
               />
             </label>
+          )}
+          {isStudyCheckpoint && (
+            <span
+              id={`checkpoint-badge-${question.id}`}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-teal-100/90 text-teal-800 border border-teal-300 dark:bg-teal-950/70 dark:text-teal-300 dark:border-teal-700"
+            >
+              <BookmarkCheck className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+              <span>Study Checkpoint</span>
+            </span>
           )}
           {question.subject && (
             <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-lg bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
@@ -156,6 +177,35 @@ export function QuestionCard({
         </div>
 
         <div className="flex items-center gap-1">
+          {onToggleStudyCheckpoint && (
+            <button
+              id={`checkpoint-btn-${question.id}`}
+              type="button"
+              onClick={() => onToggleStudyCheckpoint(question.id)}
+              title={
+                isStudyCheckpoint
+                  ? "Active Study Checkpoint (tap to remove)"
+                  : "Mark as Study Checkpoint (where I stopped studying)"
+              }
+              aria-label={
+                isStudyCheckpoint
+                  ? "Active Study Checkpoint (tap to remove)"
+                  : "Mark as Study Checkpoint (where I stopped studying)"
+              }
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                isStudyCheckpoint
+                  ? "text-teal-600 bg-teal-50 hover:bg-teal-100 dark:text-teal-300 dark:bg-teal-950/60 dark:hover:bg-teal-900/60 ring-1 ring-teal-300 dark:ring-teal-700"
+                  : "text-zinc-400 hover:text-teal-600 hover:bg-teal-50/60 dark:text-zinc-500 dark:hover:text-teal-400 dark:hover:bg-teal-950/40"
+              }`}
+            >
+              {isStudyCheckpoint ? (
+                <BookmarkCheck className="h-4 w-4 fill-current" />
+              ) : (
+                <Bookmark className="h-4 w-4" />
+              )}
+            </button>
+          )}
+
           <button
             id={`star-btn-${question.id}`}
             onClick={() => onToggleImportant(question.id)}
