@@ -148,8 +148,8 @@ export function SubjectSelect({
             disabled={disabled}
             className="w-full rounded-xl border border-zinc-300 bg-white py-2 px-3 text-xs sm:text-sm text-zinc-900 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-zinc-400 shadow-xs cursor-pointer disabled:opacity-60"
           >
-            <option value="" disabled>
-              -- Select Subject --
+            <option value="" disabled={required}>
+              {required ? "-- Select Subject --" : "-- None (Unassigned) --"}
             </option>
             {allDisplaySubjects.map((sub) => (
               <option key={sub} value={sub}>

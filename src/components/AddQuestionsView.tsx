@@ -90,7 +90,7 @@ export function AddQuestionsView({
   onSuccessNavigateToReview,
   onNavigateToSettings,
 }: AddQuestionsViewProps) {
-  const { saveDrafts, checkDuplicate, recentSubjects } = useQuestions();
+  const { saveDrafts, checkDuplicate, recentSubjects, userSubjects } = useQuestions();
 
   const [rawText, setRawText] = useState("");
   const [defaultSubject, setDefaultSubject] = useState("");
@@ -155,6 +155,7 @@ export function AddQuestionsView({
           defaultSubject: defaultSubject.trim() || undefined,
           defaultSource: defaultSource.trim() || undefined,
           apiKey: personalKey || undefined,
+          allowedSubjects: userSubjects,
         }),
       });
 
@@ -178,6 +179,23 @@ export function AddQuestionsView({
       const processedDrafts: ParsedDraftQuestion[] = rawParsed.map(
         (item: any, idx: number) => {
           const dupCheck = checkDuplicate(item.question);
+
+          // Strictly resolve subject from existing userSubjects or leave unassigned
+          let resolvedSubject = "";
+          if (
+            defaultSubject.trim() &&
+            userSubjects.some((s) => s.toLowerCase() === defaultSubject.trim().toLowerCase())
+          ) {
+            resolvedSubject = defaultSubject.trim();
+          } else if (item.suggestedSubject) {
+            const matched = userSubjects.find(
+              (s) => s.toLowerCase() === String(item.suggestedSubject).trim().toLowerCase()
+            );
+            if (matched) {
+              resolvedSubject = matched;
+            }
+          }
+
           return {
             id: `draft_${Date.now()}_${idx}`,
             type: item.type as QuestionType,
@@ -186,7 +204,7 @@ export function AddQuestionsView({
             answer: item.answer || null,
             answerMarkdown: item.answerMarkdown || null,
             explanation: item.explanation || null,
-            subject: defaultSubject.trim() || item.suggestedSubject || "General",
+            subject: resolvedSubject,
             source: defaultSource.trim() || item.source || null,
             tags: [],
             isDuplicate: dupCheck.isDuplicate,

@@ -24,9 +24,12 @@ import {
   Edit2,
   X,
   AlertCircle,
+  AlertTriangle,
+  Download,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext.tsx";
 import { useQuestions } from "../context/QuestionsContext.tsx";
+import { downloadOfflineHtml } from "../lib/exportHtml.ts";
 import {
   getStoredGeminiApiKey,
   setStoredGeminiApiKey,
@@ -50,6 +53,8 @@ export function SettingsView() {
     addUserSubject,
     renameUserSubject,
     deleteUserSubject,
+    deleteMultipleUserSubjects,
+    deleteAllUserSubjects,
   } = useQuestions();
 
   const [activeProvider, setActiveProvider] = useState<AiProvider>("gemini");
@@ -84,8 +89,29 @@ export function SettingsView() {
   const [editingSubjectOldName, setEditingSubjectOldName] = useState<string | null>(null);
   const [editingSubjectNewName, setEditingSubjectNewName] = useState("");
 
-  // Deleting confirmation state
-  const [deletingSubjectName, setDeletingSubjectName] = useState<string | null>(null);
+  // Subject selection & confirmation state
+  const [selectedSubjects, setSelectedSubjects] = useState<Set<string>>(new Set());
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    isOpen: boolean;
+    mode: "single" | "selected" | "all";
+    targetSubject?: string;
+    count?: number;
+    affectedQuestions?: number;
+  } | null>(null);
+
+  // Offline export state
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+
+  const handleExportHtml = () => {
+    if (questions.length === 0) {
+      setExportNotice("Your Question Vault is currently empty. Add questions before exporting.");
+      setTimeout(() => setExportNotice(null), 4000);
+      return;
+    }
+    const { filename, count } = downloadOfflineHtml(questions);
+    setExportNotice(`Exported ${count} questions to ${filename}`);
+    setTimeout(() => setExportNotice(null), 5000);
+  };
 
   useEffect(() => {
     const saved = getStoredGeminiApiKey();
@@ -222,6 +248,102 @@ export function SettingsView() {
   const isOpenRouterStored = Boolean(getStoredOpenRouterApiKey());
   const isStored = Boolean(getStoredGeminiApiKey());
 
+  const toggleSelectSubject = (name: string) => {
+    setSelectedSubjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedSubjects.size === subjects.length) {
+      setSelectedSubjects(new Set());
+    } else {
+      setSelectedSubjects(new Set(subjects.map((s) => s.name)));
+    }
+  };
+
+  const openDeleteConfirmSingle = (name: string) => {
+    const affected = questions.filter(
+      (q) => q.subject && q.subject.trim().toLowerCase() === name.trim().toLowerCase()
+    ).length;
+    setDeleteConfirmation({
+      isOpen: true,
+      mode: "single",
+      targetSubject: name,
+      affectedQuestions: affected,
+    });
+  };
+
+  const openDeleteConfirmSelected = () => {
+    if (selectedSubjects.size === 0) return;
+    const lowerSelected = new Set(Array.from(selectedSubjects).map((s) => s.toLowerCase()));
+    const affected = questions.filter(
+      (q) => q.subject && lowerSelected.has(q.subject.trim().toLowerCase())
+    ).length;
+    setDeleteConfirmation({
+      isOpen: true,
+      mode: "selected",
+      count: selectedSubjects.size,
+      affectedQuestions: affected,
+    });
+  };
+
+  const openDeleteConfirmAll = () => {
+    if (subjects.length === 0) return;
+    const affected = questions.filter((q) => q.subject && q.subject.trim()).length;
+    setDeleteConfirmation({
+      isOpen: true,
+      mode: "all",
+      count: subjects.length,
+      affectedQuestions: affected,
+    });
+  };
+
+  const handleExecuteDelete = async () => {
+    if (!deleteConfirmation) return;
+    setSubjectActionLoading(true);
+    setSubjectError(null);
+    setSubjectSuccess(null);
+
+    try {
+      if (deleteConfirmation.mode === "single" && deleteConfirmation.targetSubject) {
+        const name = deleteConfirmation.targetSubject;
+        await deleteUserSubject(name);
+        setSelectedSubjects((prev) => {
+          const next = new Set(prev);
+          next.delete(name);
+          return next;
+        });
+        setDeleteConfirmation(null);
+        setSubjectSuccess(`Subject "${name}" was deleted successfully.`);
+      } else if (deleteConfirmation.mode === "selected") {
+        const list = Array.from(selectedSubjects);
+        await deleteMultipleUserSubjects(list);
+        setSelectedSubjects(new Set());
+        setDeleteConfirmation(null);
+        setSubjectSuccess(`Deleted ${list.length} selected subjects.`);
+      } else if (deleteConfirmation.mode === "all") {
+        const count = subjects.length;
+        await deleteAllUserSubjects();
+        setSelectedSubjects(new Set());
+        setDeleteConfirmation(null);
+        setSubjectSuccess(`All ${count} subjects were deleted successfully.`);
+      }
+      setTimeout(() => setSubjectSuccess(null), 3500);
+    } catch (err: any) {
+      console.error("Subject deletion error:", err);
+      setSubjectError(err?.message || "Failed to complete subject deletion.");
+    } finally {
+      setSubjectActionLoading(false);
+    }
+  };
+
   const handleAddSubject = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const trimmed = newSubjectName.trim();
@@ -271,22 +393,6 @@ export function SettingsView() {
     }
   };
 
-  const handleConfirmDelete = async (name: string) => {
-    setSubjectActionLoading(true);
-    setSubjectError(null);
-    setSubjectSuccess(null);
-    try {
-      await deleteUserSubject(name);
-      setDeletingSubjectName(null);
-      setSubjectSuccess(`Removed subject "${name}".`);
-      setTimeout(() => setSubjectSuccess(null), 3000);
-    } catch (err: any) {
-      setSubjectError(err?.message || "Failed to delete subject");
-    } finally {
-      setSubjectActionLoading(false);
-    }
-  };
-
   return (
     <div className="mx-auto max-w-4xl py-8 px-4 sm:px-6 lg:px-8">
       {/* Header */}
@@ -320,21 +426,36 @@ export function SettingsView() {
               </div>
             </div>
 
-            {!isAddingSubject && (
-              <button
-                type="button"
-                id="add-subject-btn"
-                onClick={() => {
-                  setIsAddingSubject(true);
-                  setNewSubjectName("");
-                  setSubjectError(null);
-                }}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-500 shadow-xs transition-colors cursor-pointer self-start sm:self-auto"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add Subject</span>
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {subjects.length > 0 && (
+                <button
+                  type="button"
+                  id="delete-all-subjects-btn"
+                  onClick={openDeleteConfirmAll}
+                  disabled={subjectActionLoading}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:border-rose-900/60 dark:bg-zinc-800 dark:text-rose-400 dark:hover:bg-rose-950/40 shadow-xs transition-colors cursor-pointer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>Delete All</span>
+                </button>
+              )}
+
+              {!isAddingSubject && (
+                <button
+                  type="button"
+                  id="add-subject-btn"
+                  onClick={() => {
+                    setIsAddingSubject(true);
+                    setNewSubjectName("");
+                    setSubjectError(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-500 shadow-xs transition-colors cursor-pointer"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add Subject</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Feedback messages */}
@@ -408,20 +529,64 @@ export function SettingsView() {
             </form>
           )}
 
+          {/* Bulk Selection & Actions Bar */}
+          {subjects.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-zinc-50 px-3.5 py-2 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-800">
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  id="select-all-subjects-checkbox"
+                  checked={selectedSubjects.size === subjects.length && subjects.length > 0}
+                  onChange={toggleSelectAll}
+                  className="h-4 w-4 rounded-sm border-zinc-300 text-indigo-600 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 cursor-pointer"
+                />
+                <span>Select All ({subjects.length})</span>
+              </label>
+
+              {selectedSubjects.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {selectedSubjects.size} of {subjects.length} selected
+                  </span>
+                  <button
+                    type="button"
+                    id="delete-selected-subjects-btn"
+                    onClick={openDeleteConfirmSelected}
+                    className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-500 shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Delete Selected ({selectedSubjects.size})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSubjects(new Set())}
+                    className="rounded-lg border border-zinc-300 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Subjects List Grid / Badges */}
           <div className="space-y-2">
             {subjects.length === 0 ? (
-              <p className="text-xs text-zinc-500 italic">No subjects configured yet.</p>
+              <p className="text-xs text-zinc-500 italic py-2">No subjects configured yet.</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                 {subjects.map((sub) => {
                   const isRenaming = editingSubjectOldName === sub.name;
-                  const isDeleting = deletingSubjectName === sub.name;
+                  const isSelected = selectedSubjects.has(sub.name);
 
                   return (
                     <div
                       key={sub.name}
-                      className="group relative flex flex-col justify-between rounded-xl border border-zinc-200 bg-zinc-50/60 p-3 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-850/60 dark:hover:border-zinc-700 dark:hover:bg-zinc-800"
+                      className={`group relative flex flex-col justify-between rounded-xl border p-3 transition-colors ${
+                        isSelected
+                          ? "border-indigo-300 bg-indigo-50/40 dark:border-indigo-900 dark:bg-indigo-950/30"
+                          : "border-zinc-200 bg-zinc-50/60 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-850/60 dark:hover:border-zinc-700 dark:hover:bg-zinc-800"
+                      }`}
                     >
                       {isRenaming ? (
                         <div className="space-y-2">
@@ -458,32 +623,16 @@ export function SettingsView() {
                             </button>
                           </div>
                         </div>
-                      ) : isDeleting ? (
-                        <div className="space-y-2">
-                          <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
-                            Delete &ldquo;{sub.name}&rdquo;?
-                          </p>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleConfirmDelete(sub.name)}
-                              disabled={subjectActionLoading}
-                              className="rounded-md bg-rose-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-rose-700 cursor-pointer"
-                            >
-                              Confirm
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDeletingSubjectName(null)}
-                              className="rounded-md border border-zinc-300 px-2 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
                       ) : (
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <input
+                              type="checkbox"
+                              id={`checkbox-subject-${sub.name}`}
+                              checked={isSelected}
+                              onChange={() => toggleSelectSubject(sub.name)}
+                              className="h-4 w-4 rounded-sm border-zinc-300 text-indigo-600 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 cursor-pointer"
+                            />
                             <span className="truncate text-xs sm:text-sm font-semibold text-zinc-900 dark:text-white">
                               {sub.name}
                             </span>
@@ -498,7 +647,6 @@ export function SettingsView() {
                               onClick={() => {
                                 setEditingSubjectOldName(sub.name);
                                 setEditingSubjectNewName(sub.name);
-                                setDeletingSubjectName(null);
                               }}
                               title="Rename subject"
                               className="rounded-md p-1 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 transition-colors cursor-pointer"
@@ -507,10 +655,7 @@ export function SettingsView() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                setDeletingSubjectName(sub.name);
-                                setEditingSubjectOldName(null);
-                              }}
+                              onClick={() => openDeleteConfirmSingle(sub.name)}
                               title="Delete subject"
                               className="rounded-md p-1 text-zinc-400 hover:bg-rose-100 hover:text-rose-600 dark:hover:bg-rose-950/50 dark:hover:text-rose-400 transition-colors cursor-pointer"
                             >
@@ -525,6 +670,99 @@ export function SettingsView() {
               </div>
             )}
           </div>
+
+          {/* Delete Confirmation Modal */}
+          {deleteConfirmation?.isOpen && (
+            <div
+              id="delete-subject-modal"
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+            >
+              <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900 animate-in fade-in zoom-in-95 duration-150">
+                <div className="flex items-start gap-3.5 mb-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-950/70 dark:text-rose-400">
+                    <AlertTriangle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                      {deleteConfirmation.mode === "single"
+                        ? `Delete Subject "${deleteConfirmation.targetSubject}"?`
+                        : deleteConfirmation.mode === "selected"
+                        ? `Delete ${deleteConfirmation.count} Selected Subjects?`
+                        : `Delete All ${deleteConfirmation.count} Subjects?`}
+                    </h3>
+                    <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      Please confirm this destructive action
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mb-6 space-y-3 text-xs sm:text-sm text-zinc-600 dark:text-zinc-300">
+                  <p>
+                    {deleteConfirmation.mode === "single"
+                      ? `Subject "${deleteConfirmation.targetSubject}" will be permanently removed from your Subject list.`
+                      : deleteConfirmation.mode === "selected"
+                      ? `${deleteConfirmation.count} selected subjects will be permanently removed from your Subject list.`
+                      : `All ${deleteConfirmation.count} subjects will be permanently removed from your Subject list.`}
+                  </p>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200 space-y-1">
+                    <p className="font-semibold flex items-center gap-1.5">
+                      <span>✓ Questions remain intact:</span>
+                    </p>
+                    <p>
+                      Your questions will <strong>not</strong> be deleted. Any questions currently referencing{" "}
+                      {deleteConfirmation.mode === "single"
+                        ? `"${deleteConfirmation.targetSubject}"`
+                        : "these subjects"}{" "}
+                      will have their subject safely set to <em>unassigned</em>.
+                    </p>
+                    {typeof deleteConfirmation.affectedQuestions === "number" &&
+                      deleteConfirmation.affectedQuestions > 0 && (
+                        <p className="pt-1 font-medium text-amber-800 dark:text-amber-300">
+                          • Affects {deleteConfirmation.affectedQuestions} question
+                          {deleteConfirmation.affectedQuestions === 1 ? "" : "s"} with this subject.
+                        </p>
+                      )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmation(null)}
+                    disabled={subjectActionLoading}
+                    className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-xs sm:text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 cursor-pointer disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    id="confirm-execute-delete-subject-btn"
+                    onClick={handleExecuteDelete}
+                    disabled={subjectActionLoading}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50 shadow-xs cursor-pointer"
+                  >
+                    {subjectActionLoading ? (
+                      <>
+                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                        <span>Deleting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="h-4 w-4" />
+                        <span>
+                          {deleteConfirmation.mode === "single"
+                            ? "Delete Subject"
+                            : deleteConfirmation.mode === "selected"
+                            ? `Delete (${deleteConfirmation.count})`
+                            : "Delete All Subjects"}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* AI Configuration Section */}
@@ -832,6 +1070,81 @@ export function SettingsView() {
               </div>
             </div>
           )}
+        </section>
+
+        {/* Offline Study Export */}
+        <section id="offline-export-section" className="rounded-2xl border border-indigo-200/80 bg-white p-6 shadow-xs dark:border-indigo-950/60 dark:bg-zinc-900">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400 shadow-xs">
+                <Download className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-zinc-900 dark:text-white">
+                  Offline Study Export
+                </h2>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Export all your questions to a single, self-contained HTML file for studying offline
+                </p>
+              </div>
+            </div>
+            <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+              100% Offline Ready
+            </span>
+          </div>
+
+          <div className="space-y-4 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+            <p>
+              Download a complete, independent snapshot of your Question Vault. All questions, MCQ options, model answers, markdown formatting, explanations, difficulties, and subjects are packaged into a single HTML file that opens anywhere on phone or laptop without internet connection.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 py-1">
+              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800">
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100 block mb-0.5">Zero Dependencies</span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">No internet, Firebase, Gemini, external fonts, or CDN files required.</span>
+              </div>
+              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800">
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100 block mb-0.5">Dual Study Modes</span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">Card-by-Card flashcard navigation and continuous full-list browsing.</span>
+              </div>
+              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800">
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100 block mb-0.5">Offline Search & Filters</span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">Instant offline search, subject filtering, difficulty filter, and dark/light themes.</span>
+              </div>
+            </div>
+
+            {exportNotice && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-between animate-in fade-in duration-200">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span>{exportNotice}</span>
+                </div>
+                <button
+                  onClick={() => setExportNotice(null)}
+                  className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 p-1 cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
+            <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <button
+                id="export-offline-html-btn"
+                type="button"
+                onClick={handleExportHtml}
+                disabled={questions.length === 0}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400 dark:text-zinc-950 shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Download className="h-4 w-4" />
+                <span>Export to HTML ({questions.length} {questions.length === 1 ? "Question" : "Questions"})</span>
+              </button>
+
+              <span className="text-[11px] text-zinc-500 dark:text-zinc-400 text-center sm:text-left">
+                Generates <code className="font-mono text-zinc-700 dark:text-zinc-300">Question-Vault-Export-{new Date().toISOString().split("T")[0]}.html</code>
+              </span>
+            </div>
+          </div>
         </section>
 
         {/* Database & Cloud Firestore Status */}

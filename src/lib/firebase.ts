@@ -290,6 +290,34 @@ export async function batchDeleteQuestions(ids: string[]): Promise<void> {
   }
 }
 
+export async function batchUpdateQuestionsSubject(
+  questionIds: string[],
+  newSubject: string
+): Promise<void> {
+  if (!questionIds || questionIds.length === 0) return;
+  const CHUNK_SIZE = 400; // Keep safely below Firestore 500 limit
+  const now = new Date().toISOString();
+  for (let i = 0; i < questionIds.length; i += CHUNK_SIZE) {
+    const chunk = questionIds.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    for (const id of chunk) {
+      batch.update(doc(db, "questions", id), {
+        subject: newSubject,
+        updatedAt: now,
+      });
+    }
+    try {
+      await batch.commit();
+    } catch (err) {
+      handleFirestoreError(
+        err,
+        OperationType.UPDATE,
+        `questions/[batchUpdateSubject:${chunk.length}]`
+      );
+    }
+  }
+}
+
 // User Profile & Subjects Firestore Operations
 export async function saveUserSubjects(userId: string, subjects: string[]): Promise<void> {
   const path = `users/${userId}`;
@@ -345,7 +373,7 @@ export async function saveUserFlashcardCheckpoint(
 export function subscribeToUserProfile(
   userId: string,
   onData: (profile: {
-    subjects: string[];
+    subjects: string[] | null;
     studyCheckpointQuestionId: string | null;
     flashcardCheckpointQuestionId: string | null;
   }) => void,
@@ -357,7 +385,9 @@ export function subscribeToUserProfile(
     (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const subs: string[] = Array.isArray(data.subjects) ? data.subjects : [];
+        const hasSubjectsField =
+          Object.prototype.hasOwnProperty.call(data, "subjects") && Array.isArray(data.subjects);
+        const subs: string[] | null = hasSubjectsField ? data.subjects : null;
         const checkpointId: string | null =
           typeof data.studyCheckpointQuestionId === "string" && data.studyCheckpointQuestionId.trim()
             ? data.studyCheckpointQuestionId.trim()
@@ -374,7 +404,7 @@ export function subscribeToUserProfile(
         });
       } else {
         onData({
-          subjects: [],
+          subjects: null,
           studyCheckpointQuestionId: null,
           flashcardCheckpointQuestionId: null,
         });

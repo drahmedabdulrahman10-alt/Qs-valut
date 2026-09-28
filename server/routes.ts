@@ -136,7 +136,13 @@ apiRouter.post("/test-gemini-key", async (req: Request, res: Response) => {
  */
 apiRouter.post("/parse-questions", async (req: Request, res: Response) => {
   try {
-    const { text, defaultSubject, defaultSource, apiKey: apiKeyFromBody } = req.body || {};
+    const {
+      text,
+      defaultSubject,
+      defaultSource,
+      apiKey: apiKeyFromBody,
+      allowedSubjects,
+    } = req.body || {};
     const apiKeyFromHeader = req.headers["x-gemini-api-key"] as string | undefined;
     const customApiKey = (apiKeyFromBody || apiKeyFromHeader || "").trim() || undefined;
 
@@ -152,11 +158,18 @@ apiRouter.post("/parse-questions", async (req: Request, res: Response) => {
       });
     }
 
+    const sanitizedAllowedSubjects = Array.isArray(allowedSubjects)
+      ? allowedSubjects
+          .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+          .map((s) => s.trim())
+      : undefined;
+
     const result = await parseQuestionsWithGemini(
       text,
       typeof defaultSubject === "string" ? defaultSubject : undefined,
       typeof defaultSource === "string" ? defaultSource : undefined,
-      customApiKey
+      customApiKey,
+      sanitizedAllowedSubjects
     );
 
     return res.json({

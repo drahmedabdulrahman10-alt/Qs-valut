@@ -16,9 +16,11 @@ import {
   Sparkles,
   BookmarkCheck,
   Bookmark,
+  Download,
 } from "lucide-react";
 import { Question, QuestionType, QuestionDifficulty } from "../types/question.ts";
 import { useQuestions } from "../context/QuestionsContext.tsx";
+import { downloadOfflineHtml } from "../lib/exportHtml.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
 import { FormatAnswerModal } from "./FormatAnswerModal.tsx";
 import { BulkFormatModal } from "./BulkFormatModal.tsx";
@@ -269,6 +271,25 @@ export function QuestionListView({
     }
   };
 
+  const handleExportAllHtml = () => {
+    if (questions.length === 0) {
+      setBulkActionNotice("No questions available to export.");
+      setTimeout(() => setBulkActionNotice(null), 4000);
+      return;
+    }
+    const { filename, count } = downloadOfflineHtml(questions);
+    setBulkActionNotice(`Exported ${count} questions to ${filename}`);
+    setTimeout(() => setBulkActionNotice(null), 5000);
+  };
+
+  const handleExportSelectedHtml = () => {
+    if (selectedIds.size === 0) return;
+    const selectedList = questions.filter((q) => selectedIds.has(q.id));
+    const { filename, count } = downloadOfflineHtml(selectedList);
+    setBulkActionNotice(`Exported ${count} selected questions to ${filename}`);
+    setTimeout(() => setBulkActionNotice(null), 5000);
+  };
+
   return (
     <div className="mx-auto max-w-7xl py-6 px-4 sm:px-6 lg:px-8 space-y-6 pb-24">
       {/* Search and Header */}
@@ -331,6 +352,18 @@ export function QuestionListView({
               <span>{allVisibleSelected ? "Deselect All" : "Select All"}</span>
             </button>
           )}
+
+          <button
+            id="export-bank-html-btn"
+            type="button"
+            onClick={handleExportAllHtml}
+            disabled={questions.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-3.5 py-2 text-xs sm:text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-750 transition-colors cursor-pointer disabled:opacity-50"
+            title="Export all questions to a single self-contained offline HTML study file"
+          >
+            <Download className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+            <span>Export to HTML</span>
+          </button>
 
           <button
             onClick={onNavigateToAdd}
@@ -611,6 +644,17 @@ export function QuestionListView({
                 className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 transition-colors cursor-pointer"
               >
                 {allVisibleSelected ? "Deselect All" : `Select All (${filteredQuestions.length})`}
+              </button>
+
+              <button
+                type="button"
+                id="export-selected-html-btn"
+                onClick={handleExportSelectedHtml}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 transition-colors cursor-pointer"
+                title="Export selected questions to an offline HTML study guide"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Export ({selectedIds.size})</span>
               </button>
 
               <button

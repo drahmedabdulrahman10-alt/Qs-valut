@@ -215,9 +215,11 @@ export function isStructuralAnswerLabel(text: string): boolean {
 export function sanitizeExtractedQuestions(
   rawList: any[],
   defaultSubject?: string,
-  defaultSource?: string
+  defaultSource?: string,
+  allowedSubjects?: string[]
 ): ParsedQuestionResult[] {
   const sanitized: ParsedQuestionResult[] = [];
+  const hasAllowed = Array.isArray(allowedSubjects);
 
   for (const item of rawList) {
     if (!item) continue;
@@ -256,7 +258,7 @@ export function sanitizeExtractedQuestions(
       continue;
     }
 
-    // Check if question text is accidentally a continuation of an answer list (e.g. "2. Enteral nutrition:" or "3. Parenteral nutrition")
+    // Check if question text is accidentally a continuation of an answer list
     const isAnswerContinuation =
       /^\d+[\.\)]\s+(?:Enteral|Parenteral|Routes|Indications|Contraindications|Advantages|Disadvantages|Causes|Types|Features|Complications|Management|Treatment)\b/i.test(
         questionText
@@ -303,6 +305,30 @@ export function sanitizeExtractedQuestions(
         ? item.options.filter((opt: any) => typeof opt === "string" && opt.trim().length > 0)
         : undefined;
 
+    // Resolve subject strictly: AI must NEVER create its own subject
+    let finalSubject: string | undefined = undefined;
+    if (hasAllowed) {
+      const rawSub = (item.suggestedSubject || "").trim();
+      const matched = allowedSubjects.find(
+        (allowed) => allowed.trim().toLowerCase() === rawSub.toLowerCase()
+      );
+      if (matched) {
+        finalSubject = matched.trim();
+      } else if (
+        defaultSubject &&
+        allowedSubjects.some(
+          (allowed) => allowed.trim().toLowerCase() === defaultSubject.trim().toLowerCase()
+        )
+      ) {
+        finalSubject = defaultSubject.trim();
+      } else {
+        // Not in allowed list: AI must NEVER invent subjects
+        finalSubject = undefined;
+      }
+    } else {
+      finalSubject = item.suggestedSubject?.trim() || defaultSubject || undefined;
+    }
+
     sanitized.push({
       type: validCategory,
       question: questionText,
@@ -312,7 +338,7 @@ export function sanitizeExtractedQuestions(
         item.answerMarkdown?.trim() ||
         (answerStr && answerStr.length > 0 ? formatAnswerLocally(answerStr) : null),
       explanation: explanationStr && explanationStr.length > 0 ? explanationStr : null,
-      suggestedSubject: item.suggestedSubject?.trim() || defaultSubject || undefined,
+      suggestedSubject: finalSubject,
       source: item.source || defaultSource || undefined,
       confidence: typeof item.confidence === "number" ? item.confidence : 0.95,
     });
@@ -333,7 +359,8 @@ export function sanitizeExtractedQuestions(
 export function parseQuestionsLocally(
   rawText: string,
   defaultSubject?: string,
-  defaultSource?: string
+  defaultSource?: string,
+  allowedSubjects?: string[]
 ): ParsedQuestionResult[] {
   const trimmed = rawText.trim();
   if (!trimmed) return [];
@@ -471,7 +498,7 @@ export function parseQuestionsLocally(
   }
 
   finalizeCurrent();
-  return sanitizeExtractedQuestions(questions, defaultSubject, defaultSource);
+  return sanitizeExtractedQuestions(questions, defaultSubject, defaultSource, allowedSubjects);
 }
 
 /**
@@ -482,7 +509,8 @@ export async function parseQuestionsWithGemini(
   rawText: string,
   defaultSubject?: string,
   defaultSource?: string,
-  customApiKey?: string
+  customApiKey?: string,
+  allowedSubjects?: string[]
 ): Promise<ParseResultResponse> {
   const trimmed = rawText.trim();
   if (!trimmed) {
@@ -490,6 +518,7 @@ export async function parseQuestionsWithGemini(
   }
 
   const ai = getGenAI(customApiKey);
+  const hasAllowedSubjects = Array.isArray(allowedSubjects) && allowedSubjects.length > 0;
 
   const systemInstruction = `You are a world-class academic and medical question parser and document organizer.
 Your sole job is to analyze study material (including messy notes, copied PDFs, lecture slides, WhatsApp messages, past exams) and extract structured question-and-answer pairs.
@@ -547,12 +576,32 @@ CRITICAL CORE DIRECTIVES
 
 7. PRESERVE ORIGINAL ANSWER ACCURACY:
    - Clean up obvious PDF copy artifacts (broken line wraps, duplicate spaces), but faithfully preserve all terminology, numbered points, and bulleted items.
-   - Support mixed Arabic and English text seamlessly.`;
+   - Support mixed Arabic and English text seamlessly.
+
+8. CONTROLLED VOCABULARY FOR SUBJECTS (STRICT ZERO-CREATION RULE):
+   ${
+     hasAllowedSubjects
+       ? `The user has provided an explicit list of existing Subjects:
+   [ ${allowedSubjects.map((s) => `"${s}"`).join(", ")} ]
+   RULES:
+   - You MUST ONLY choose a subject from this exact list.
+   - You are STRICTLY FORBIDDEN from creating a new subject, inventing sub-specialties, inventing synonyms, or modifying names.
+   - For example: if the allowed list contains "Surgery", do NOT output "General Surgery", "Surgical Oncology", or "Abdominal Surgery". Output "Surgery".
+   - If a question does NOT clearly fit any of the allowed subjects, set suggestedSubject to null or empty string. Do NOT invent a subject.`
+       : `No custom subjects are configured. Do NOT invent or create any subjects. Set suggestedSubject to empty string ("") or null.`
+   }`;
 
   const prompt = `Please analyze and parse the following study material into structured question-and-answer pairs:
 
 ${defaultSubject ? `Default Subject: ${defaultSubject}\n` : ""}
 ${defaultSource ? `Default Source: ${defaultSource}\n` : ""}
+${
+  hasAllowedSubjects
+    ? `Allowed Subjects (Controlled Vocabulary - CHOOSE ONLY FROM THIS LIST OR LEAVE EMPTY):\n${allowedSubjects
+        .map((s) => `- ${s}`)
+        .join("\n")}\n`
+    : "Allowed Subjects: NONE. Set suggestedSubject to empty string.\n"
+}
 
 Study Material:
 """
@@ -612,7 +661,9 @@ ${trimmed}
                       },
                       suggestedSubject: {
                         type: Type.STRING,
-                        description: "Inferred academic subject/discipline if apparent.",
+                        description: hasAllowedSubjects
+                          ? `Must be EXACTLY one of: ${allowedSubjects.join(", ")}, or empty string. NEVER invent any new subject.`
+                          : "Must be empty string or null. Never invent subjects.",
                       },
                       confidence: {
                         type: Type.NUMBER,
@@ -636,7 +687,12 @@ ${trimmed}
         const parsed = JSON.parse(responseText);
         const rawQuestions = parsed.questions || [];
 
-        const sanitized = sanitizeExtractedQuestions(rawQuestions, defaultSubject, defaultSource);
+        const sanitized = sanitizeExtractedQuestions(
+          rawQuestions,
+          defaultSubject,
+          defaultSource,
+          allowedSubjects
+        );
 
         if (sanitized.length > 0) {
           return {
@@ -661,7 +717,12 @@ ${trimmed}
   }
 
   // If candidate AI models hit transient demand spikes, engage our smart semantic local organizer
-  const fallbackQuestions = parseQuestionsLocally(trimmed, defaultSubject, defaultSource);
+  const fallbackQuestions = parseQuestionsLocally(
+    trimmed,
+    defaultSubject,
+    defaultSource,
+    allowedSubjects
+  );
   if (fallbackQuestions.length > 0) {
     return {
       questions: fallbackQuestions,

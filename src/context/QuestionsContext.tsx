@@ -6,6 +6,7 @@ import {
   updateExistingQuestion,
   removeQuestion,
   batchDeleteQuestions,
+  batchUpdateQuestionsSubject,
   subscribeToUserQuestions,
   saveUserSubjects,
   saveUserStudyCheckpoint,
@@ -45,6 +46,8 @@ interface QuestionsContextType {
   addUserSubject: (name: string) => Promise<string>;
   renameUserSubject: (oldName: string, newName: string) => Promise<void>;
   deleteUserSubject: (name: string) => Promise<void>;
+  deleteMultipleUserSubjects: (names: string[]) => Promise<void>;
+  deleteAllUserSubjects: () => Promise<void>;
   studyCheckpointQuestionId: string | null;
   studyCheckpointQuestion: Question | null;
   setStudyCheckpoint: (questionId: string | null) => Promise<void>;
@@ -122,10 +125,10 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
     const unsubscribeProfile = subscribeToUserProfile(
       user.uid,
       (profile) => {
-        if (profile.subjects && profile.subjects.length > 0) {
+        if (profile.subjects !== null) {
           setUserSubjects(profile.subjects);
         } else {
-          // If the user has no saved subjects yet, seed with defaults
+          // If the user has no saved subjects yet (initial setup), seed with defaults
           setUserSubjects(DEFAULT_PREDEFINED_SUBJECTS);
           saveUserSubjects(user.uid, DEFAULT_PREDEFINED_SUBJECTS).catch((err) =>
             console.warn("Failed to seed initial subjects in Firestore:", err)
@@ -160,50 +163,17 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribeProfile();
   }, [user]);
 
-  // Calculate subjects with dynamic counts from user's actual Firestore questions
+  // Single reliable source of truth: subjects defined by the user in userSubjects
   const subjects = useMemo(() => {
-    const questionCounts = new Map<string, number>();
-    for (const q of questions) {
-      const sub = (q.subject || "General").trim();
-      if (sub) {
-        // Track case-insensitive lookup, preserve proper case
-        const existingKey = Array.from(questionCounts.keys()).find(
-          (k) => k.toLowerCase() === sub.toLowerCase()
-        );
-        const key = existingKey || sub;
-        questionCounts.set(key, (questionCounts.get(key) || 0) + 1);
-      }
-    }
-
-    // Merge predefined userSubjects with any existing question subjects
-    const mergedMap = new Map<string, number>();
-
-    // First add all userSubjects with their counts (or 0)
-    for (const sub of userSubjects) {
-      const trimmed = sub.trim();
-      if (!trimmed) continue;
-      // Check if there are counts under any case match
-      const matchingKey = Array.from(questionCounts.keys()).find(
-        (k) => k.toLowerCase() === trimmed.toLowerCase()
-      );
-      const count = matchingKey ? questionCounts.get(matchingKey) || 0 : 0;
-      mergedMap.set(trimmed, count);
-    }
-
-    // Next add any question subjects not in userSubjects
-    for (const [sub, count] of questionCounts.entries()) {
-      const exists = Array.from(mergedMap.keys()).some(
-        (k) => k.toLowerCase() === sub.toLowerCase()
-      );
-      if (!exists) {
-        mergedMap.set(sub, count);
-      }
-    }
-
-    return Array.from(mergedMap.entries())
-      .map(([name, count]) => ({ name, count }))
+    return userSubjects
+      .map((name) => {
+        const trimmed = name.trim();
+        const count = questions.filter(
+          (q) => q.subject && q.subject.trim().toLowerCase() === trimmed.toLowerCase()
+        ).length;
+        return { name: trimmed, count };
+      })
       .sort((a, b) => {
-        // Sort by count descending, then alphabetically
         if (b.count !== a.count) {
           return b.count - a.count;
         }
@@ -245,45 +215,146 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
     [userSubjects, user]
   );
 
-  // Rename a user subject
+  // Rename a user subject and all its question references
   const renameUserSubject = useCallback(
     async (oldName: string, newName: string): Promise<void> => {
+      const trimmedOld = oldName.trim();
       const trimmedNew = newName.trim();
       if (!trimmedNew) throw new Error("New subject name cannot be empty.");
-      if (oldName.toLowerCase() === trimmedNew.toLowerCase()) return;
+      if (trimmedOld.toLowerCase() === trimmedNew.toLowerCase()) return;
 
       const updatedSubjects = userSubjects.map((s) =>
-        s.toLowerCase() === oldName.toLowerCase() ? trimmedNew : s
+        s.toLowerCase() === trimmedOld.toLowerCase() ? trimmedNew : s
       );
-      setUserSubjects(updatedSubjects);
+
+      const matchingQuestions = questions.filter(
+        (q) => q.subject && q.subject.trim().toLowerCase() === trimmedOld.toLowerCase()
+      );
 
       if (user) {
         await saveUserSubjects(user.uid, updatedSubjects);
-
-        // Update all questions that had the old subject
-        const questionsToUpdate = questions.filter(
-          (q) => q.subject.toLowerCase() === oldName.toLowerCase()
-        );
-        for (const q of questionsToUpdate) {
-          await updateExistingQuestion(q.id, { subject: trimmedNew });
+        if (matchingQuestions.length > 0) {
+          await batchUpdateQuestionsSubject(
+            matchingQuestions.map((q) => q.id),
+            trimmedNew
+          );
         }
+      }
+
+      setUserSubjects(updatedSubjects);
+      if (matchingQuestions.length > 0) {
+        setQuestions((prev) =>
+          prev.map((q) =>
+            q.subject && q.subject.trim().toLowerCase() === trimmedOld.toLowerCase()
+              ? { ...q, subject: trimmedNew, updatedAt: new Date().toISOString() }
+              : q
+          )
+        );
       }
     },
     [userSubjects, questions, user]
   );
 
-  // Delete a user subject
+  // Delete a single user subject and clear references from questions
   const deleteUserSubject = useCallback(
     async (name: string): Promise<void> => {
+      const trimmed = name.trim();
       const updated = userSubjects.filter(
-        (s) => s.toLowerCase() !== name.toLowerCase()
+        (s) => s.toLowerCase() !== trimmed.toLowerCase()
       );
-      setUserSubjects(updated);
+
+      const questionsToClear = questions.filter(
+        (q) => q.subject && q.subject.trim().toLowerCase() === trimmed.toLowerCase()
+      );
+
       if (user) {
         await saveUserSubjects(user.uid, updated);
+        if (questionsToClear.length > 0) {
+          await batchUpdateQuestionsSubject(
+            questionsToClear.map((q) => q.id),
+            ""
+          );
+        }
+      }
+
+      setUserSubjects(updated);
+      if (questionsToClear.length > 0) {
+        setQuestions((prev) =>
+          prev.map((q) =>
+            q.subject && q.subject.trim().toLowerCase() === trimmed.toLowerCase()
+              ? { ...q, subject: "", updatedAt: new Date().toISOString() }
+              : q
+          )
+        );
       }
     },
-    [userSubjects, user]
+    [userSubjects, questions, user]
+  );
+
+  // Delete multiple user subjects and clear references from questions
+  const deleteMultipleUserSubjects = useCallback(
+    async (names: string[]): Promise<void> => {
+      if (!names || names.length === 0) return;
+      const lowerNames = new Set(names.map((n) => n.trim().toLowerCase()));
+      const updated = userSubjects.filter(
+        (s) => !lowerNames.has(s.trim().toLowerCase())
+      );
+
+      const questionsToClear = questions.filter(
+        (q) => q.subject && lowerNames.has(q.subject.trim().toLowerCase())
+      );
+
+      if (user) {
+        await saveUserSubjects(user.uid, updated);
+        if (questionsToClear.length > 0) {
+          await batchUpdateQuestionsSubject(
+            questionsToClear.map((q) => q.id),
+            ""
+          );
+        }
+      }
+
+      setUserSubjects(updated);
+      if (questionsToClear.length > 0) {
+        setQuestions((prev) =>
+          prev.map((q) =>
+            q.subject && lowerNames.has(q.subject.trim().toLowerCase())
+              ? { ...q, subject: "", updatedAt: new Date().toISOString() }
+              : q
+          )
+        );
+      }
+    },
+    [userSubjects, questions, user]
+  );
+
+  // Delete all user subjects and clear references from questions
+  const deleteAllUserSubjects = useCallback(
+    async (): Promise<void> => {
+      const questionsToClear = questions.filter((q) => q.subject && q.subject.trim());
+
+      if (user) {
+        await saveUserSubjects(user.uid, []);
+        if (questionsToClear.length > 0) {
+          await batchUpdateQuestionsSubject(
+            questionsToClear.map((q) => q.id),
+            ""
+          );
+        }
+      }
+
+      setUserSubjects([]);
+      if (questionsToClear.length > 0) {
+        setQuestions((prev) =>
+          prev.map((q) =>
+            q.subject && q.subject.trim()
+              ? { ...q, subject: "", updatedAt: new Date().toISOString() }
+              : q
+          )
+        );
+      }
+    },
+    [questions, user]
   );
 
   // Check duplicate against existing questions
@@ -344,7 +415,7 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
       answer: d.answer ? d.answer.trim() : null,
       answerMarkdown: d.answerMarkdown ? d.answerMarkdown.trim() : null,
       explanation: d.explanation ? d.explanation.trim() : null,
-      subject: d.subject.trim() || "General",
+      subject: d.subject?.trim() || "",
       source: d.source ? d.source.trim() : null,
       tags: d.tags || [],
       difficulty: "medium",
@@ -503,6 +574,8 @@ export function QuestionsProvider({ children }: { children: React.ReactNode }) {
         addUserSubject,
         renameUserSubject,
         deleteUserSubject,
+        deleteMultipleUserSubjects,
+        deleteAllUserSubjects,
         studyCheckpointQuestionId,
         studyCheckpointQuestion,
         setStudyCheckpoint,
