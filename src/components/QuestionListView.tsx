@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Search,
   Filter,
@@ -65,6 +65,16 @@ export function QuestionListView({
     initialFilterType === "needs_review"
   );
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "review_count">("newest");
+
+  // Keep selected subject in sync if it gets deleted
+  useEffect(() => {
+    if (
+      selectedSubject !== "all" &&
+      !subjects.some((s) => s.name.toLowerCase() === selectedSubject.toLowerCase())
+    ) {
+      setSelectedSubject("all");
+    }
+  }, [subjects, selectedSubject]);
 
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

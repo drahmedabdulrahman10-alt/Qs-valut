@@ -326,7 +326,7 @@ export function sanitizeExtractedQuestions(
         finalSubject = undefined;
       }
     } else {
-      finalSubject = item.suggestedSubject?.trim() || defaultSubject || undefined;
+      finalSubject = undefined;
     }
 
     sanitized.push({

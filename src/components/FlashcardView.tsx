@@ -95,6 +95,16 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
   const hasAutoResumedRef = useRef(false);
   const isInitializedRef = useRef(false);
 
+  // Keep selected subject in sync if it gets deleted
+  useEffect(() => {
+    if (
+      selectedSubject !== "all" &&
+      !subjects.some((s) => s.name === selectedSubject)
+    ) {
+      setSelectedSubject("all");
+    }
+  }, [subjects, selectedSubject]);
+
   useEffect(() => {
     const filtersChanged =
       prevFilterRef.current.poolFilter !== poolFilter ||

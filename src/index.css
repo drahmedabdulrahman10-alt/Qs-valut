@@ -17,3 +17,34 @@
   font-family: var(--font-serif);
 }
 
+/* Enhanced table and formatted answer presentation */
+.formatted-answer-container {
+  word-break: break-word;
+}
+
+.formatted-answer-container table {
+  border-spacing: 0;
+}
+
+.formatted-answer-container .overflow-x-auto {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(16, 185, 129, 0.3) transparent;
+}
+
+.formatted-answer-container .overflow-x-auto::-webkit-scrollbar {
+  height: 6px;
+}
+
+.formatted-answer-container .overflow-x-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.formatted-answer-container .overflow-x-auto::-webkit-scrollbar-thumb {
+  background-color: rgba(16, 185, 129, 0.3);
+  border-radius: 9999px;
+}
+
+.dark .formatted-answer-container .overflow-x-auto::-webkit-scrollbar-thumb {
+  background-color: rgba(16, 185, 129, 0.4);
+}
+
