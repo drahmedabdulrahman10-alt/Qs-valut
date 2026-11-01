@@ -159,7 +159,7 @@ ${rawAnswer.trim()}
         contents: prompt,
         config: {
           systemInstruction: FORMAT_ANSWER_SYSTEM_INSTRUCTION,
-          temperature: 0.1, // very low temperature to ensure strict adherence to original wording
+          ...(model !== "gemini-3.8-flash" ? { temperature: 0.1 } : {}),
         },
       });
 

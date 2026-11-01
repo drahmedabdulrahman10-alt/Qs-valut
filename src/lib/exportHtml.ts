@@ -18,7 +18,7 @@ export function generateOfflineHtml(questions: Question[]): string {
     options: Array.isArray(q.options) ? q.options : [],
     answer: q.answerMarkdown || q.formattedAnswer || q.answer || "",
     explanation: q.explanation || "",
-    subject: q.subject || "General",
+    subject: q.subject ? q.subject.trim() : "",
     difficulty: q.difficulty || null,
     important: Boolean(q.important),
     createdAt: q.createdAt || "",
@@ -542,6 +542,67 @@ export function generateOfflineHtml(questions: Question[]): string {
     .answer-content h2 { font-size: 15px; }
     .answer-content h3 { font-size: 14px; }
 
+    /* Markdown Tables */
+    .table-wrapper {
+      margin: 12px 0;
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      background: var(--surface);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+
+    .answer-content table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .answer-content thead {
+      background: var(--surface-subtle);
+      border-bottom: 2px solid var(--border-subtle);
+    }
+
+    .answer-content th {
+      padding: 9px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text);
+      border-right: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .answer-content th:last-child {
+      border-right: none;
+    }
+
+    .answer-content td {
+      padding: 9px 12px;
+      color: var(--text);
+      border-top: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      vertical-align: top;
+      min-width: 110px;
+    }
+
+    .answer-content td:first-child {
+      font-weight: 600;
+    }
+
+    .answer-content td:last-child {
+      border-right: none;
+    }
+
+    .answer-content tbody tr:nth-child(even) {
+      background: var(--surface-subtle);
+    }
+
     .no-answer {
       font-style: italic;
       color: var(--text-muted);
@@ -833,7 +894,21 @@ export function generateOfflineHtml(questions: Question[]): string {
       str = str.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
       str = str.replace(/\\*(.*?)\\*/g, '<em>$1</em>');
 
-      // Line by line parsing for lists & paragraphs
+      // Helper to split a Markdown table row into cell strings
+      function splitTableRow(rowText) {
+        let trimmed = rowText.trim();
+        if (trimmed.startsWith('|')) trimmed = trimmed.slice(1);
+        if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1);
+        return trimmed.split('|').map(function(cell) { return cell.trim(); });
+      }
+
+      function isTableSeparatorLine(rowText) {
+        if (!rowText || rowText.indexOf('|') === -1) return false;
+        return /^\\s*\\|?(?:\\s*:?-{2,}:?\\s*\\|)+\\s*:?-{2,}:?\\s*\\|?\\s*$/.test(rowText) ||
+               /^\\s*\\|(?:\\s*:?-{2,}:?\\s*\\|)+\\s*$/.test(rowText);
+      }
+
+      // Line by line parsing for tables, lists & paragraphs
       const lines = str.split('\\n');
       let inUl = false;
       let inOl = false;
@@ -841,6 +916,54 @@ export function generateOfflineHtml(questions: Question[]): string {
 
       for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
+
+        // Check for Markdown table block (header row + separator row)
+        if (
+          line.indexOf('|') !== -1 &&
+          i + 1 < lines.length &&
+          isTableSeparatorLine(lines[i + 1])
+        ) {
+          if (inUl) { result.push('</ul>'); inUl = false; }
+          if (inOl) { result.push('</ol>'); inOl = false; }
+
+          const headers = splitTableRow(line);
+          const alignments = splitTableRow(lines[i + 1]).map(function(sep) {
+            const s = sep.trim();
+            if (s.startsWith(':') && s.endsWith(':')) return 'center';
+            if (s.endsWith(':')) return 'right';
+            return 'left';
+          });
+
+          let tableHtml = '<div class="table-wrapper"><table><thead><tr>';
+          headers.forEach(function(h, colIdx) {
+            const align = alignments[colIdx] || 'left';
+            tableHtml += '<th style="text-align:' + align + ';">' + h + '</th>';
+          });
+          tableHtml += '</tr></thead><tbody>';
+
+          i += 2; // advance past header and separator rows
+          while (i < lines.length && lines[i].trim().length > 0 && lines[i].indexOf('|') !== -1) {
+            if (isTableSeparatorLine(lines[i])) {
+              i++;
+              continue;
+            }
+            const cells = splitTableRow(lines[i]);
+            tableHtml += '<tr>';
+            for (let colIdx = 0; colIdx < headers.length; colIdx++) {
+              const align = alignments[colIdx] || 'left';
+              const cellContent = colIdx < cells.length ? cells[colIdx] : '';
+              tableHtml += '<td style="text-align:' + align + ';">' + cellContent + '</td>';
+            }
+            tableHtml += '</tr>';
+            i++;
+          }
+          i--; // step back one so the outer loop's i++ lands on the next non-table line
+
+          tableHtml += '</tbody></table></div>';
+          result.push(tableHtml);
+          continue;
+        }
+
         const ulMatch = line.match(/^[\\*\\-]\\s+(.*)$/);
         const olMatch = line.match(/^(\\d+)\\.\\s+(.*)$/);
 
@@ -856,7 +979,7 @@ export function generateOfflineHtml(questions: Question[]): string {
           if (inUl) { result.push('</ul>'); inUl = false; }
           if (inOl) { result.push('</ol>'); inOl = false; }
           if (line.trim().length > 0) {
-            if (/^<(h[1-3]|pre)/i.test(line.trim())) {
+            if (/^<(h[1-3]|pre|div)/i.test(line.trim())) {
               result.push(line);
             } else {
               result.push('<p>' + line + '</p>');
@@ -874,11 +997,20 @@ export function generateOfflineHtml(questions: Question[]): string {
     function populateSubjects() {
       const subjectSelect = document.getElementById('subject-filter');
       const subjects = new Set();
+      let hasUnassigned = false;
       RAW_QUESTIONS.forEach(q => {
         if (q.subject && q.subject.trim()) {
           subjects.add(q.subject.trim());
+        } else {
+          hasUnassigned = true;
         }
       });
+      if (hasUnassigned) {
+        const unassignedOpt = document.createElement('option');
+        unassignedOpt.value = '__UNASSIGNED__';
+        unassignedOpt.textContent = 'Unassigned';
+        subjectSelect.appendChild(unassignedOpt);
+      }
       const sorted = Array.from(subjects).sort((a, b) => a.localeCompare(b));
       sorted.forEach(sub => {
         const opt = document.createElement('option');
@@ -907,7 +1039,11 @@ export function generateOfflineHtml(questions: Question[]): string {
         }
 
         // Subject
-        if (subject !== 'all' && q.subject !== subject) return false;
+        if (subject === '__UNASSIGNED__') {
+          if (q.subject && q.subject.trim()) return false;
+        } else if (subject !== 'all' && q.subject !== subject) {
+          return false;
+        }
 
         // Type
         if (type !== 'all' && q.type !== type) return false;
@@ -1003,7 +1139,7 @@ export function generateOfflineHtml(questions: Question[]): string {
       const diffBadge = q.difficulty ? '<span class="badge badge-' + q.difficulty + '">' + q.difficulty + '</span>' : '';
       const impBadge = q.important ? '<span class="badge badge-important">&#9733; Important</span>' : '';
       const typeBadge = '<span class="badge">' + (typeLabels[q.type] || q.type) + '</span>';
-      const subBadge = '<span class="badge badge-subject">' + escapeHtml(q.subject || 'General') + '</span>';
+      const subBadge = '<span class="badge badge-subject">' + escapeHtml(q.subject || 'Unassigned') + '</span>';
 
       return '<div class="card" id="question-card-' + (cardIndex !== undefined ? cardIndex : '') + '">' +
         '<div class="card-badges">' +

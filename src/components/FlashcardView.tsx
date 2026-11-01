@@ -52,6 +52,12 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
   const [deck, setDeck] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
+  const [isDeckCompleted, setIsDeckCompleted] = useState(false);
+  const [lastRatedDifficulty, setLastRatedDifficulty] = useState<QuestionDifficulty | null>(null);
+
+  const unassignedCount = useMemo(() => {
+    return questions.filter((q) => !q.subject || !q.subject.trim()).length;
+  }, [questions]);
 
   // Filter and sort pool questions based on filters
   const getFilteredQuestions = useCallback(
@@ -61,7 +67,14 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
         if (filter === "needs_review" && q.reviewCount > 0 && q.difficulty !== "hard") {
           return false;
         }
-        if (subject !== "all" && q.subject !== subject) return false;
+        if (subject === "__UNASSIGNED__") {
+          if (q.subject && q.subject.trim() !== "") return false;
+        } else if (
+          subject !== "all" &&
+          q.subject.trim().toLowerCase() !== subject.trim().toLowerCase()
+        ) {
+          return false;
+        }
         return true;
       });
 
@@ -99,6 +112,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
   useEffect(() => {
     if (
       selectedSubject !== "all" &&
+      selectedSubject !== "__UNASSIGNED__" &&
       !subjects.some((s) => s.name === selectedSubject)
     ) {
       setSelectedSubject("all");
@@ -118,6 +132,8 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
       prevQuestionsCountRef.current = questions.length;
       const filtered = getFilteredQuestions(questions, poolFilter, selectedSubject);
       setDeck(filtered);
+      setIsDeckCompleted(false);
+      setLastRatedDifficulty(null);
 
       const targetId = checkpointIdRef.current;
       if (targetId) {
@@ -156,6 +172,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
         hasAutoResumedRef.current = true;
         setCurrentIndex(targetIdx);
         setIsFlipped(false);
+        setIsDeckCompleted(false);
       }
     }
   }, [flashcardCheckpointQuestionId, deck]);
@@ -166,6 +183,8 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
     const shuffled = [...deck].sort(() => Math.random() - 0.5);
     setDeck(shuffled);
     setIsFlipped(false);
+    setIsDeckCompleted(false);
+    setLastRatedDifficulty(null);
     if (flashcardCheckpointQuestionId) {
       const idx = shuffled.findIndex((q) => q.id === flashcardCheckpointQuestionId);
       if (idx !== -1) {
@@ -185,6 +204,8 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
 
   const handleNext = useCallback(() => {
     hasAutoResumedRef.current = true;
+    setIsDeckCompleted(false);
+    setLastRatedDifficulty(null);
     setCurrentIndex((prev) => {
       if (prev < deck.length - 1) {
         const nextIdx = prev + 1;
@@ -200,6 +221,8 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
 
   const handlePrev = useCallback(() => {
     hasAutoResumedRef.current = true;
+    setIsDeckCompleted(false);
+    setLastRatedDifficulty(null);
     setCurrentIndex((prev) => {
       if (prev > 0) {
         const prevIdx = prev - 1;
@@ -213,9 +236,20 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
     });
   }, [deck, setFlashcardCheckpoint]);
 
+  const handleRestartDeck = useCallback(() => {
+    hasAutoResumedRef.current = true;
+    setIsDeckCompleted(false);
+    setLastRatedDifficulty(null);
+    setIsFlipped(false);
+    setCurrentIndex(0);
+    if (deck[0]) {
+      setFlashcardCheckpoint(deck[0].id);
+    }
+  }, [deck, setFlashcardCheckpoint]);
+
   const handleRate = useCallback(
     async (difficulty: QuestionDifficulty) => {
-      if (!currentCard) return;
+      if (!currentCard || isDeckCompleted) return;
       hasAutoResumedRef.current = true;
 
       // Stably capture the exact question ID being rated
@@ -226,9 +260,15 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
         const nextIdx = currentIndex + 1;
         setCurrentIndex(nextIdx);
         setIsFlipped(false);
+        setIsDeckCompleted(false);
+        setLastRatedDifficulty(null);
         if (deck[nextIdx]) {
           setFlashcardCheckpoint(deck[nextIdx].id);
         }
+      } else {
+        // Final card in deck rated: lock rating controls and show completion feedback
+        setIsDeckCompleted(true);
+        setLastRatedDifficulty(difficulty);
       }
 
       // Persist the review rating for the target question ID
@@ -238,7 +278,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
         console.error("Failed to record review for question:", targetQuestionId, err);
       }
     },
-    [currentCard, currentIndex, deck, recordReview, setFlashcardCheckpoint]
+    [currentCard, currentIndex, deck, isDeckCompleted, recordReview, setFlashcardCheckpoint]
   );
 
   const checkpointInCurrentDeck = useMemo(() => {
@@ -252,6 +292,8 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
     if (idx !== -1) {
       setCurrentIndex(idx);
       setIsFlipped(false);
+      setIsDeckCompleted(false);
+      setLastRatedDifficulty(null);
     }
   }, [deck, flashcardCheckpointQuestionId]);
 
@@ -276,7 +318,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
       } else if (e.code === "ArrowLeft") {
         e.preventDefault();
         handlePrev();
-      } else if (isFlipped) {
+      } else if (isFlipped && !isDeckCompleted) {
         if (e.key === "1") handleRate("easy");
         if (e.key === "2") handleRate("medium");
         if (e.key === "3") handleRate("hard");
@@ -285,7 +327,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isFlipped, handleNext, handlePrev, handleRate]);
+  }, [isFlipped, isDeckCompleted, handleNext, handlePrev, handleRate]);
 
   if (deck.length === 0) {
     return (
@@ -309,7 +351,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
               className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 shadow-xs cursor-pointer"
             >
               <Layers className="h-4 w-4" />
-              <span>Resume Saved Flashcard ({flashcardCheckpointQuestion.subject || "General"})</span>
+              <span>Resume Saved Flashcard ({flashcardCheckpointQuestion.subject || "Unassigned"})</span>
             </button>
           )}
           {questions.length > 0 ? (
@@ -357,6 +399,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
           </select>
 
           <select
+            id="flashcard-subject-filter-select"
             value={selectedSubject}
             onChange={(e) => setSelectedSubject(e.target.value)}
             className="rounded-lg border border-zinc-200 bg-white py-1.5 px-3 text-xs font-medium text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 shadow-xs"
@@ -367,6 +410,9 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
                 {s.name} ({s.count})
               </option>
             ))}
+            <option value="__UNASSIGNED__">
+              Unassigned ({unassignedCount})
+            </option>
           </select>
         </div>
 
@@ -398,7 +444,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
                   Flashcard Checkpoint Active
                 </span>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300">
-                  {flashcardCheckpointQuestion.subject || "General"}
+                  {flashcardCheckpointQuestion.subject || "Unassigned"}
                 </span>
               </div>
               <p className="mt-0.5 text-xs sm:text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate" dir="auto">
@@ -468,7 +514,7 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
           <div className="flex items-center justify-between gap-2 mb-4 pb-3 border-b border-zinc-100 dark:border-zinc-800/80">
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
-                {currentCard.subject || "General"}
+                {currentCard.subject || "Unassigned"}
               </span>
               <span className="text-xs font-medium px-2 py-0.5 rounded-md border border-zinc-200 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400 uppercase tracking-wider">
                 {currentCard.type}
@@ -607,6 +653,41 @@ export function FlashcardView({ onNavigateToAdd }: FlashcardViewProps) {
               <Eye className="h-4 w-4" />
               <span>Reveal Answer (Press Space)</span>
             </button>
+          ) : isDeckCompleted ? (
+            <div
+              id="deck-completed-feedback"
+              className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-center dark:border-emerald-900/60 dark:bg-emerald-950/30 space-y-3 animate-in fade-in duration-200"
+            >
+              <div className="flex items-center justify-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold text-sm">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                <span>
+                  Deck Completed! Final card rated{" "}
+                  <span className="capitalize underline">{lastRatedDifficulty}</span>.
+                </span>
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                You have reviewed all {deck.length} {deck.length === 1 ? "card" : "cards"} in this deck. Your review progress has been saved.
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                <button
+                  id="restart-deck-btn"
+                  type="button"
+                  onClick={handleRestartDeck}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-zinc-900 px-4 py-2 text-xs font-semibold text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white shadow-xs cursor-pointer transition-colors"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Restart Deck from Card 1</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShuffle}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 cursor-pointer transition-colors"
+                >
+                  <Shuffle className="h-3.5 w-3.5" />
+                  <span>Shuffle & Review Again</span>
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="space-y-3">
               <span className="block text-center text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">

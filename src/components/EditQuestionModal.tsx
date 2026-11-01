@@ -88,7 +88,7 @@ export function EditQuestionModal({
         answer: answer.trim() ? answer.trim() : null,
         answerMarkdown: answerMarkdown.trim() ? answerMarkdown.trim() : null,
         explanation: explanation.trim() ? explanation.trim() : null,
-        subject: subject.trim() || "General",
+        subject: subject.trim(),
         source: source.trim() ? source.trim() : null,
         difficulty,
         important,

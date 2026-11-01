@@ -943,7 +943,8 @@ export function AddQuestionsView({
             type="button"
             onClick={() => {
               setRawText(SAMPLE_NUTRITIONAL_SUPPORT);
-              setDefaultSubject("Surgery");
+              const match = userSubjects.find((s) => s.toLowerCase() === "surgery");
+              setDefaultSubject(match || "");
               setDefaultSource("Surgical Notes");
             }}
             className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-750 dark:bg-zinc-800 dark:text-zinc-300"
@@ -954,7 +955,10 @@ export function AddQuestionsView({
             type="button"
             onClick={() => {
               setRawText(SAMPLE_HYPERPARATHYROIDISM);
-              setDefaultSubject("Nephrology");
+              const match = userSubjects.find(
+                (s) => s.toLowerCase() === "endocrinology" || s.toLowerCase() === "internal medicine"
+              );
+              setDefaultSubject(match || "");
               setDefaultSource("Case Study");
             }}
             className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-750 dark:bg-zinc-800 dark:text-zinc-300"
@@ -965,7 +969,10 @@ export function AddQuestionsView({
             type="button"
             onClick={() => {
               setRawText(SAMPLE_MCQ_BATCH);
-              setDefaultSubject("Medicine");
+              const match = userSubjects.find(
+                (s) => s.toLowerCase() === "internal medicine" || s.toLowerCase() === "medicine"
+              );
+              setDefaultSubject(match || "");
               setDefaultSource("Board Review");
             }}
             className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-750 dark:bg-zinc-800 dark:text-zinc-300"

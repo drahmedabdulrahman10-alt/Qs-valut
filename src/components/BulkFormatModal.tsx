@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Sparkles, X, CheckCircle2, AlertCircle, RefreshCw, Loader2 } from "lucide-react";
 import { Question } from "../types/question.ts";
 import { requestAnswerFormatting } from "../lib/answerFormattingService.ts";
@@ -20,14 +20,22 @@ export function BulkFormatModal({
 }: BulkFormatModalProps) {
   const [inProgress, setInProgress] = useState<boolean>(false);
   const [completed, setCompleted] = useState<boolean>(false);
+  const [wasCancelled, setWasCancelled] = useState<boolean>(false);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [successCount, setSuccessCount] = useState<number>(0);
   const [skippedCount, setSkippedCount] = useState<number>(0);
   const [errors, setErrors] = useState<{ id: string; error: string }[]>([]);
+  const cancelRequestedRef = useRef<boolean>(false);
 
   if (!isOpen) return null;
 
+  const handleCancelFormatting = () => {
+    cancelRequestedRef.current = true;
+  };
+
   const handleStartFormatting = async () => {
+    cancelRequestedRef.current = false;
+    setWasCancelled(false);
     setInProgress(true);
     setCompleted(false);
     setCurrentIndex(0);
@@ -40,6 +48,11 @@ export function BulkFormatModal({
     const errorList: { id: string; error: string }[] = [];
 
     for (let i = 0; i < selectedQuestions.length; i++) {
+      if (cancelRequestedRef.current) {
+        setWasCancelled(true);
+        break;
+      }
+
       const q = selectedQuestions[i];
       setCurrentIndex(i + 1);
 
@@ -65,6 +78,11 @@ export function BulkFormatModal({
         console.error(`Failed to format question ${q.id}:`, err);
         errorList.push({ id: q.id, error: err.message || "Failed" });
         setErrors([...errorList]);
+      }
+
+      if (cancelRequestedRef.current) {
+        setWasCancelled(true);
+        break;
       }
 
       // Brief breathing room between requests to avoid rate limits
@@ -146,7 +164,7 @@ export function BulkFormatModal({
               </div>
 
               <p className="text-[11px] text-zinc-400 text-center">
-                Please keep this window open while formatting is in progress.
+                Please keep this window open, or click Cancel below to stop after the current answer finishes.
               </p>
             </div>
           )}
@@ -157,10 +175,11 @@ export function BulkFormatModal({
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <h3 className="text-sm sm:text-base font-semibold text-zinc-900 dark:text-white">
-                Formatting Completed
+                {wasCancelled ? "Formatting Stopped" : "Formatting Completed"}
               </h3>
               <p className="text-xs text-zinc-600 dark:text-zinc-300">
-                Formatted <strong>{successCount}</strong> answer{successCount === 1 ? "" : "s"} successfully.
+                Formatted <strong>{successCount}</strong> answer{successCount === 1 ? "" : "s"} successfully
+                {wasCancelled ? " before stopping." : "."}
                 {skippedCount > 0 && ` (${skippedCount} skipped due to empty answers)`}
               </p>
 
@@ -197,6 +216,17 @@ export function BulkFormatModal({
                 Start Formatting
               </button>
             </>
+          )}
+
+          {inProgress && (
+            <button
+              id="cancel-bulk-format-btn"
+              type="button"
+              onClick={handleCancelFormatting}
+              className="px-4 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-800 rounded-xl transition-colors cursor-pointer"
+            >
+              Cancel Formatting
+            </button>
           )}
 
           {completed && (

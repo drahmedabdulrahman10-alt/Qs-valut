@@ -27,13 +27,17 @@ export function SubjectSelect({
   const [addingError, setAddingError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Ensure current value is in the list even if it was custom
+  // Strictly display only existing user subjects (never inject undeclared subjects)
   const allDisplaySubjects = React.useMemo(() => {
-    const list = [...subjectNames];
-    if (value && value.trim() && !list.some((s) => s.toLowerCase() === value.trim().toLowerCase())) {
-      list.unshift(value.trim());
-    }
-    return list;
+    return [...subjectNames];
+  }, [subjectNames]);
+
+  const normalizedValue = React.useMemo(() => {
+    if (!value || !value.trim()) return "";
+    const matched = subjectNames.find(
+      (s) => s.toLowerCase() === value.trim().toLowerCase()
+    );
+    return matched || "";
   }, [subjectNames, value]);
 
   const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -142,7 +146,7 @@ export function SubjectSelect({
         <div className="relative">
           <select
             id={id}
-            value={value}
+            value={normalizedValue}
             onChange={handleSelectChange}
             required={required}
             disabled={disabled}

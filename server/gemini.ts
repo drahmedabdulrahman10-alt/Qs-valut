@@ -99,6 +99,26 @@ function isTransientError(err: any): boolean {
   );
 }
 
+function isModelNotFoundError(err: any): boolean {
+  if (!err) return false;
+  const status = err?.status ?? err?.code ?? err?.error?.code;
+  const errStatus = String(err?.error?.status || "").toUpperCase();
+  if (status === 404 || errStatus === "NOT_FOUND") {
+    return true;
+  }
+  const str = String(err?.message || err || "").toLowerCase();
+  // Match HTTP 404 / NOT_FOUND for a model endpoint without masking 400/401/403 auth errors
+  if (str.includes("api_key_invalid") || str.includes("permission_denied") || str.includes("403") || str.includes("401")) {
+    return false;
+  }
+  return (
+    str.includes("404") ||
+    str.includes("not_found") ||
+    str.includes("is not found for api version") ||
+    (str.includes("models/") && str.includes("not found"))
+  );
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -128,16 +148,16 @@ export async function testGeminiApiKey(
       if (res && res.text) {
         return {
           success: true,
-          message: "Gemini API connection successful.",
+          message: `Gemini API connection successful (${model}).`,
           model,
         };
       }
     } catch (err: any) {
       lastErr = err;
-      if (isTransientError(err)) {
+      if (isTransientError(err) || isModelNotFoundError(err)) {
         continue;
       }
-      // If error is 400 or invalid key, return immediately
+      // If error is 400, 403, or another non-404/non-transient error, return immediately without masking it
       const errMsg = cleanErrorMessage(err);
       return {
         success: false,

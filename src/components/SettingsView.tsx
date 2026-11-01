@@ -816,11 +816,13 @@ export function SettingsView() {
 
           <div className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-4 mb-6 dark:border-zinc-800 dark:bg-zinc-950/40">
             <p className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
-              Active primary provider:{" "}
-              <strong className="text-zinc-900 dark:text-zinc-100 capitalize">
-                {activeProvider === "gemini" ? "Google Gemini (Gemini 2.5 Flash)" : "OpenRouter"}
+              Active formatting provider:{" "}
+              <strong className="text-zinc-900 dark:text-zinc-100">
+                {activeProvider === "gemini"
+                  ? "Google Gemini (gemini-3.1-flash-lite / gemini-3.8-flash / gemini-flash-latest)"
+                  : "OpenRouter"}
               </strong>
-              . Keys are saved securely in your browser and used exclusively for question structuring and answer layout beautification.
+              . Question extraction uses Google Gemini (with automatic local parser fallback), while answer layout formatting uses your selected provider above. Keys are stored locally in your browser.
             </p>
           </div>
 
@@ -834,7 +836,9 @@ export function SettingsView() {
                 >
                   Gemini API Key
                 </label>
-                <span className="text-xs text-zinc-400 font-mono">Model: gemini-2.5-flash</span>
+                <span className="text-xs text-zinc-400 font-mono">
+                  Models: gemini-3.1-flash-lite &rarr; gemini-flash-latest
+                </span>
               </div>
 
               <div className="relative">

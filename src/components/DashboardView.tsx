@@ -21,6 +21,7 @@ interface DashboardViewProps {
   onNavigateToAdd: () => void;
   onNavigateToReview: () => void;
   onNavigateToListWithFilter: (filterType?: string, filterSubject?: string) => void;
+  onResumeStudyCheckpoint?: () => void;
   onEditQuestion: (q: Question) => void;
 }
 
@@ -28,6 +29,7 @@ export function DashboardView({
   onNavigateToAdd,
   onNavigateToReview,
   onNavigateToListWithFilter,
+  onResumeStudyCheckpoint,
   onEditQuestion,
 }: DashboardViewProps) {
   const {
@@ -115,7 +117,7 @@ export function DashboardView({
                   Study Checkpoint Active
                 </span>
                 <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-teal-100 text-teal-800 dark:bg-teal-900/60 dark:text-teal-300">
-                  {studyCheckpointQuestion.subject || "General"}
+                  {studyCheckpointQuestion.subject || "Unassigned"}
                 </span>
               </div>
               <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100 line-clamp-1" dir="auto">
@@ -126,13 +128,11 @@ export function DashboardView({
           <button
             id="dashboard-resume-checkpoint-btn"
             onClick={() => {
-              onNavigateToListWithFilter();
-              setTimeout(() => {
-                const el = document.getElementById(`question-card-${studyCheckpointQuestion.id}`);
-                if (el) {
-                  el.scrollIntoView({ behavior: "smooth", block: "center" });
-                }
-              }, 200);
+              if (onResumeStudyCheckpoint) {
+                onResumeStudyCheckpoint();
+              } else {
+                onNavigateToListWithFilter();
+              }
             }}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-xs hover:bg-teal-800 dark:bg-teal-500 dark:text-zinc-950 dark:hover:bg-teal-400 transition-colors shrink-0 cursor-pointer"
           >
@@ -158,7 +158,7 @@ export function DashboardView({
                   Flashcard Checkpoint Active
                 </span>
                 <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300">
-                  {flashcardCheckpointQuestion.subject || "General"}
+                  {flashcardCheckpointQuestion.subject || "Unassigned"}
                 </span>
               </div>
               <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100 line-clamp-1" dir="auto">

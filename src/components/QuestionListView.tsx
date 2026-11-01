@@ -29,6 +29,8 @@ interface QuestionListViewProps {
   key?: React.Key;
   initialFilterType?: string;
   initialFilterSubject?: string;
+  autoResumeCheckpoint?: boolean;
+  onCheckpointResumed?: () => void;
   onNavigateToAdd: () => void;
   onEditQuestion: (q: Question) => void;
 }
@@ -36,6 +38,8 @@ interface QuestionListViewProps {
 export function QuestionListView({
   initialFilterType,
   initialFilterSubject,
+  autoResumeCheckpoint = false,
+  onCheckpointResumed,
   onNavigateToAdd,
   onEditQuestion,
 }: QuestionListViewProps) {
@@ -64,12 +68,20 @@ export function QuestionListView({
   const [needsReviewOnly, setNeedsReviewOnly] = useState<boolean>(
     initialFilterType === "needs_review"
   );
+  const [masteredOnly, setMasteredOnly] = useState<boolean>(
+    initialFilterType === "mastered"
+  );
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "review_count">("newest");
+
+  const unassignedCount = useMemo(() => {
+    return questions.filter((q) => !q.subject || !q.subject.trim()).length;
+  }, [questions]);
 
   // Keep selected subject in sync if it gets deleted
   useEffect(() => {
     if (
       selectedSubject !== "all" &&
+      selectedSubject !== "__UNASSIGNED__" &&
       !subjects.some((s) => s.name.toLowerCase() === selectedSubject.toLowerCase())
     ) {
       setSelectedSubject("all");
@@ -81,6 +93,7 @@ export function QuestionListView({
   const [isConfirmingBulkDelete, setIsConfirmingBulkDelete] = useState<boolean>(false);
   const [isDeletingBulk, setIsDeletingBulk] = useState<boolean>(false);
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
+  const [bulkErrorNotice, setBulkErrorNotice] = useState<string | null>(null);
 
   // Formatting state
   const [formattingQuestion, setFormattingQuestion] = useState<Question | null>(null);
@@ -119,7 +132,7 @@ export function QuestionListView({
 
     const questionIndex = questions.findIndex((q) => q.id === studyCheckpointQuestionId) + 1;
     setCheckpointNotice({
-      message: `Resumed from Study Checkpoint: Question #${questionIndex} (${targetQuestion.subject || "General"})`,
+      message: `Resumed from Study Checkpoint: Question #${questionIndex} (${targetQuestion.subject || "Unassigned"})`,
       type: "success",
     });
     setHighlightedQuestionId(studyCheckpointQuestionId);
@@ -145,16 +158,34 @@ export function QuestionListView({
   // Filtered and sorted questions
   const filteredQuestions = useMemo(() => {
     return questions.filter((q) => {
-      // Search term
+      // Search term (matches question, answer, answerMarkdown, options, explanation, subject, source, tags)
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
         const matchesQuestion = q.question.toLowerCase().includes(term);
         const matchesAnswer = q.answer ? q.answer.toLowerCase().includes(term) : false;
+        const matchesAnswerMarkdown = q.answerMarkdown
+          ? q.answerMarkdown.toLowerCase().includes(term)
+          : false;
+        const matchesOptions = Array.isArray(q.options)
+          ? q.options.some((opt) => opt && opt.toLowerCase().includes(term))
+          : false;
+        const matchesExplanation = q.explanation
+          ? q.explanation.toLowerCase().includes(term)
+          : false;
         const matchesSubject = q.subject.toLowerCase().includes(term);
         const matchesSource = q.source ? q.source.toLowerCase().includes(term) : false;
         const matchesTags = q.tags ? q.tags.some((t) => t.toLowerCase().includes(term)) : false;
 
-        if (!matchesQuestion && !matchesAnswer && !matchesSubject && !matchesSource && !matchesTags) {
+        if (
+          !matchesQuestion &&
+          !matchesAnswer &&
+          !matchesAnswerMarkdown &&
+          !matchesOptions &&
+          !matchesExplanation &&
+          !matchesSubject &&
+          !matchesSource &&
+          !matchesTags
+        ) {
           return false;
         }
       }
@@ -164,8 +195,15 @@ export function QuestionListView({
         return false;
       }
 
-      // Subject filter
-      if (selectedSubject !== "all" && q.subject.toLowerCase() !== selectedSubject.toLowerCase()) {
+      // Subject filter (including Unassigned)
+      if (selectedSubject === "__UNASSIGNED__") {
+        if (q.subject && q.subject.trim() !== "") {
+          return false;
+        }
+      } else if (
+        selectedSubject !== "all" &&
+        q.subject.trim().toLowerCase() !== selectedSubject.trim().toLowerCase()
+      ) {
         return false;
       }
 
@@ -176,6 +214,11 @@ export function QuestionListView({
 
       // Needs review
       if (needsReviewOnly && q.reviewCount > 0 && q.difficulty !== "hard") {
+        return false;
+      }
+
+      // Mastered filter (difficulty === "easy" && reviewCount > 0)
+      if (masteredOnly && !(q.difficulty === "easy" && q.reviewCount > 0)) {
         return false;
       }
 
@@ -204,6 +247,7 @@ export function QuestionListView({
     selectedSubject,
     importantOnly,
     needsReviewOnly,
+    masteredOnly,
     difficultyFilter,
     sortBy,
   ]);
@@ -214,6 +258,7 @@ export function QuestionListView({
     selectedSubject !== "all" ||
     importantOnly ||
     needsReviewOnly ||
+    masteredOnly ||
     difficultyFilter !== "all";
 
   const clearAllFilters = () => {
@@ -222,6 +267,7 @@ export function QuestionListView({
     setSelectedSubject("all");
     setImportantOnly(false);
     setNeedsReviewOnly(false);
+    setMasteredOnly(false);
     setDifficultyFilter("all");
   };
 
@@ -264,9 +310,20 @@ export function QuestionListView({
     setSelectedIds(new Set());
   };
 
+  // Auto-resume Study Checkpoint when navigated from Dashboard
+  useEffect(() => {
+    if (autoResumeCheckpoint && studyCheckpointQuestionId && questions.length > 0) {
+      handleContinueWhereStopped();
+      if (onCheckpointResumed) {
+        onCheckpointResumed();
+      }
+    }
+  }, [autoResumeCheckpoint, studyCheckpointQuestionId, questions.length]);
+
   const handleConfirmBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     setIsDeletingBulk(true);
+    setBulkErrorNotice(null);
     try {
       const count = await bulkDeleteQuestions(Array.from(selectedIds));
       setSelectedIds(new Set());
@@ -275,7 +332,8 @@ export function QuestionListView({
       setTimeout(() => setBulkActionNotice(null), 4000);
     } catch (err: any) {
       console.error("Bulk delete error:", err);
-      alert(err?.message || "Failed to delete selected questions.");
+      setIsConfirmingBulkDelete(false);
+      setBulkErrorNotice(err?.message || "Failed to delete selected questions. Please try again.");
     } finally {
       setIsDeletingBulk(false);
     }
@@ -301,7 +359,7 @@ export function QuestionListView({
   };
 
   return (
-    <div className="mx-auto max-w-7xl py-6 px-4 sm:px-6 lg:px-8 space-y-6 pb-24">
+    <div className="mx-auto max-w-7xl py-6 px-4 sm:px-6 lg:px-8 space-y-6 pb-28">
       {/* Search and Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -416,6 +474,24 @@ export function QuestionListView({
         </div>
       )}
 
+      {bulkErrorNotice && (
+        <div
+          id="bulk-error-notice-banner"
+          className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+            <span>{bulkErrorNotice}</span>
+          </div>
+          <button
+            onClick={() => setBulkErrorNotice(null)}
+            className="text-rose-600 hover:text-rose-800 dark:text-rose-400 p-1 cursor-pointer"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Global Search Bar */}
       <div className="relative">
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
@@ -424,7 +500,7 @@ export function QuestionListView({
           type="text"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Search by question text, answer, subject, source, or tags..."
+          placeholder="Search by question text, options, answer, explanation, subject, source, or tags..."
           className="w-full rounded-xl border border-zinc-300 bg-white py-2.5 pl-10 pr-10 text-sm placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 shadow-xs"
         />
         {searchTerm && (
@@ -496,6 +572,9 @@ export function QuestionListView({
               {s.name} ({s.count})
             </option>
           ))}
+          <option value="__UNASSIGNED__">
+            Unassigned ({unassignedCount})
+          </option>
         </select>
 
         {/* Important Star toggle */}
@@ -513,7 +592,11 @@ export function QuestionListView({
 
         {/* Needs Review */}
         <button
-          onClick={() => setNeedsReviewOnly(!needsReviewOnly)}
+          onClick={() => {
+            const next = !needsReviewOnly;
+            setNeedsReviewOnly(next);
+            if (next) setMasteredOnly(false);
+          }}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
             needsReviewOnly
               ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300"
@@ -522,6 +605,24 @@ export function QuestionListView({
         >
           <Layers className="h-3.5 w-3.5 text-zinc-400" />
           <span>Needs Review</span>
+        </button>
+
+        {/* Mastered */}
+        <button
+          id="filter-mastered-btn"
+          onClick={() => {
+            const next = !masteredOnly;
+            setMasteredOnly(next);
+            if (next) setNeedsReviewOnly(false);
+          }}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+            masteredOnly
+              ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+              : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+          }`}
+        >
+          <Sparkles className={`h-3.5 w-3.5 ${masteredOnly ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}`} />
+          <span>Mastered</span>
         </button>
 
         {/* Difficulty */}
@@ -567,7 +668,7 @@ export function QuestionListView({
           Showing {filteredQuestions.length} of {questions.length} {questions.length === 1 ? "question" : "questions"}
           {selectedSubject !== "all" && (
             <span className="ml-1 text-zinc-800 dark:text-zinc-200 font-semibold">
-              in {selectedSubject}
+              in {selectedSubject === "__UNASSIGNED__" ? "Unassigned" : selectedSubject}
             </span>
           )}
         </div>
@@ -631,27 +732,36 @@ export function QuestionListView({
         </div>
       )}
 
-      {/* Floating Bulk Action Toolbar */}
+      {/* Floating Bulk Action Toolbar (positioned above MobileNav on small screens) */}
       {selectedIds.size > 0 && (
         <div
           id="bulk-action-toolbar"
-          className="fixed bottom-6 inset-x-4 max-w-xl mx-auto z-40 animate-in fade-in slide-in-from-bottom-4 duration-200"
+          className="fixed bottom-20 md:bottom-6 inset-x-3 sm:inset-x-4 max-w-xl mx-auto z-40 animate-in fade-in slide-in-from-bottom-4 duration-200"
         >
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-md dark:border-zinc-700 dark:bg-zinc-900/95">
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold shadow-xs">
-                ✓
-              </span>
-              <span className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-white">
-                {selectedIds.size} selected
-              </span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-2xl border border-zinc-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-md dark:border-zinc-700 dark:bg-zinc-900/95">
+            <div className="flex items-center justify-between sm:justify-start gap-2.5">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold shadow-xs">
+                  ✓
+                </span>
+                <span className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-white">
+                  {selectedIds.size} selected
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleDeselectAll}
+                className="sm:hidden text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400"
+              >
+                Clear
+              </button>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={allVisibleSelected ? handleDeselectAll : handleSelectAllVisible}
-                className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 transition-colors cursor-pointer"
+                className="rounded-xl border border-zinc-200 bg-zinc-50 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 transition-colors cursor-pointer"
               >
                 {allVisibleSelected ? "Deselect All" : `Select All (${filteredQuestions.length})`}
               </button>
@@ -660,7 +770,7 @@ export function QuestionListView({
                 type="button"
                 id="export-selected-html-btn"
                 onClick={handleExportSelectedHtml}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 transition-colors cursor-pointer"
                 title="Export selected questions to an offline HTML study guide"
               >
                 <Download className="h-3.5 w-3.5" />
@@ -671,7 +781,7 @@ export function QuestionListView({
                 type="button"
                 id="bulk-format-selected-btn"
                 onClick={() => setIsBulkFormatting(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-xs transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 sm:px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-xs transition-colors cursor-pointer"
                 title="Format all selected answers with AI"
               >
                 <Sparkles className="h-3.5 w-3.5" />
@@ -682,7 +792,7 @@ export function QuestionListView({
                 type="button"
                 id="delete-selected-btn"
                 onClick={() => setIsConfirmingBulkDelete(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 shadow-xs transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-3 sm:px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 shadow-xs transition-colors cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 <span>Delete Selected</span>

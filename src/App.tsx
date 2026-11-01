@@ -33,6 +33,7 @@ function MainContent() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [filterType, setFilterType] = useState<string | undefined>(undefined);
   const [filterSubject, setFilterSubject] = useState<string | undefined>(undefined);
+  const [resumeStudyCheckpoint, setResumeStudyCheckpoint] = useState<boolean>(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== "undefined" ? navigator.onLine : true);
 
@@ -48,8 +49,16 @@ function MainContent() {
   }, []);
 
   const handleNavigateToListWithFilter = (type?: string, subject?: string) => {
+    setResumeStudyCheckpoint(false);
     setFilterType(type);
     setFilterSubject(subject);
+    setActiveTab("list");
+  };
+
+  const handleResumeStudyCheckpointFromDashboard = () => {
+    setFilterType(undefined);
+    setFilterSubject(undefined);
+    setResumeStudyCheckpoint(true);
     setActiveTab("list");
   };
 
@@ -78,6 +87,7 @@ function MainContent() {
           if (tab === "list") {
             setFilterType(undefined);
             setFilterSubject(undefined);
+            setResumeStudyCheckpoint(false);
           }
           setActiveTab(tab);
         }}
@@ -121,6 +131,7 @@ function MainContent() {
             onNavigateToAdd={() => setActiveTab("add")}
             onNavigateToReview={() => setActiveTab("flashcards")}
             onNavigateToListWithFilter={handleNavigateToListWithFilter}
+            onResumeStudyCheckpoint={handleResumeStudyCheckpointFromDashboard}
             onEditQuestion={(q) => setEditingQuestion(q)}
           />
         )}
@@ -130,6 +141,7 @@ function MainContent() {
             onSuccessNavigateToList={() => {
               setFilterType(undefined);
               setFilterSubject(undefined);
+              setResumeStudyCheckpoint(false);
               setActiveTab("list");
             }}
             onSuccessNavigateToReview={() => setActiveTab("flashcards")}
@@ -142,6 +154,8 @@ function MainContent() {
             key={`${filterType || "all"}_${filterSubject || "all"}`}
             initialFilterType={filterType}
             initialFilterSubject={filterSubject}
+            autoResumeCheckpoint={resumeStudyCheckpoint}
+            onCheckpointResumed={() => setResumeStudyCheckpoint(false)}
             onNavigateToAdd={() => setActiveTab("add")}
             onEditQuestion={(q) => setEditingQuestion(q)}
           />
